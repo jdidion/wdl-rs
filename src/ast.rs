@@ -2,6 +2,7 @@ use anyhow::{bail, ensure, Error, Result};
 use regex::Regex;
 use std::{
     collections::HashSet,
+    convert::TryInto,
     fmt::Display,
     mem::discriminant,
     ops::{Deref, Range},
@@ -77,6 +78,19 @@ impl FromStr for Integer {
     }
 }
 
+impl TryInto<i64> for Integer {
+    type Error = Error;
+
+    fn try_into(self) -> Result<i64> {
+        let i = match self {
+            Integer::Decimal(i) => i,
+            Integer::Octal(o) => i64::from_str_radix(&o, 8)?,
+            Integer::Hex(h) => i64::from_str_radix(&h, 16)?,
+        };
+        Ok(i)
+    }
+}
+
 #[derive(Debug)]
 pub enum Float {
     Decimal(f64),
@@ -106,6 +120,17 @@ impl FromStr for Float {
             Self::Decimal(s.parse::<f64>()?)
         };
         Ok(f)
+    }
+}
+
+impl TryInto<f64> for Float {
+    type Error = Error;
+
+    fn try_into(self) -> Result<f64> {
+        match self {
+            Float::Decimal(f) => Ok(f),
+            Float::Scientific(s) => Ok(s.parse()?),
+        }
     }
 }
 
