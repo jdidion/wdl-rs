@@ -22,9 +22,10 @@ impl<'a> TryFrom<TSNode<'a>> for CallInput {
     type Error = Error;
 
     fn try_from(mut node: TSNode<'a>) -> Result<Self> {
-        let name = node.field_string_node(syntax::NAME)?;
-        let expression = node.get_field_node(syntax::EXPRESSION)?;
-        Ok(Self { name, expression })
+        Ok(Self {
+            name: node.field_string_node(syntax::NAME)?,
+            expression: node.get_field_node(syntax::EXPRESSION)?,
+        })
     }
 }
 
@@ -32,13 +33,10 @@ impl<'a> TryFrom<TSNode<'a>> for Call {
     type Error = Error;
 
     fn try_from(mut node: TSNode<'a>) -> Result<Self> {
-        let target = node.field_node(syntax::TARGET)?;
-        let alias = node.get_field_node(syntax::ALIAS)?;
-        let inputs = node.get_field_child_nodes(syntax::INPUTS)?;
         Ok(Self {
-            target,
-            alias,
-            inputs,
+            target: node.field_node(syntax::TARGET)?,
+            alias: node.get_field_node(syntax::ALIAS)?,
+            inputs: node.get_field_child_nodes(syntax::INPUTS)?,
         })
     }
 }
@@ -47,13 +45,10 @@ impl<'a> TryFrom<TSNode<'a>> for Scatter {
     type Error = Error;
 
     fn try_from(mut node: TSNode<'a>) -> Result<Self> {
-        let name = node.field_string_node(syntax::NAME)?;
-        let expression = node.field_node(syntax::EXPRESSION)?;
-        let body = node.field_child_nodes(syntax::BODY)?;
         Ok(Self {
-            name,
-            expression,
-            body,
+            name: node.field_string_node(syntax::NAME)?,
+            expression: node.field_node(syntax::EXPRESSION)?,
+            body: node.field_child_nodes(syntax::BODY)?,
         })
     }
 }
@@ -62,9 +57,10 @@ impl<'a> TryFrom<TSNode<'a>> for Conditional {
     type Error = Error;
 
     fn try_from(mut node: TSNode<'a>) -> Result<Self> {
-        let expression = node.field_node(syntax::EXPRESSION)?;
-        let body = node.field_child_nodes(syntax::BODY)?;
-        Ok(Self { expression, body })
+        Ok(Self {
+            expression: node.field_node(syntax::EXPRESSION)?,
+            body: node.field_child_nodes(syntax::BODY)?,
+        })
     }
 }
 
@@ -105,8 +101,9 @@ impl<'a> TryFrom<TSNode<'a>> for Workflow {
     type Error = Error;
 
     fn try_from(mut node: TSNode<'a>) -> Result<Self> {
-        let name = node.field_string_node(syntax::NAME)?;
-        let body = node.get_field_child_nodes(syntax::BODY)?;
-        Ok(Self { name, body })
+        Ok(Self {
+            name: node.field_string_node(syntax::NAME)?,
+            body: node.get_field_child_nodes(syntax::BODY)?,
+        })
     }
 }

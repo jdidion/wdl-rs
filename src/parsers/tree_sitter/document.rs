@@ -30,9 +30,10 @@ impl<'a> TryFrom<TSNode<'a>> for Alias {
     type Error = Error;
 
     fn try_from(mut node: TSNode<'a>) -> Result<Self> {
-        let from = node.field_node(syntax::FROM)?;
-        let to = node.field_node(syntax::TO)?;
-        Ok(Self { from, to })
+        Ok(Self {
+            from: node.field_node(syntax::FROM)?,
+            to: node.field_node(syntax::TO)?,
+        })
     }
 }
 
@@ -59,9 +60,10 @@ impl<'a> TryFrom<TSNode<'a>> for Struct {
     type Error = Error;
 
     fn try_from(mut node: TSNode<'a>) -> Result<Self> {
-        let name = node.field_node(syntax::NAME)?;
-        let fields = node.field_child_nodes(syntax::FIELDS)?;
-        Ok(Self { name, fields })
+        Ok(Self {
+            name: node.field_node(syntax::NAME)?,
+            fields: node.field_child_nodes(syntax::FIELDS)?,
+        })
     }
 }
 

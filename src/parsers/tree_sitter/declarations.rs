@@ -40,9 +40,10 @@ impl<'a> TryFrom<TSNode<'a>> for UnboundDeclaration {
     type Error = Error;
 
     fn try_from(mut node: TSNode<'a>) -> Result<Self> {
-        let wdl_type = node.field_node(syntax::TYPE)?;
-        let name = node.field_string_node(syntax::NAME)?;
-        Ok(Self { wdl_type, name })
+        Ok(Self {
+            wdl_type: node.field_node(syntax::TYPE)?,
+            name: node.field_string_node(syntax::NAME)?,
+        })
     }
 }
 
@@ -50,13 +51,10 @@ impl<'a> TryFrom<TSNode<'a>> for BoundDeclaration {
     type Error = Error;
 
     fn try_from(mut node: TSNode<'a>) -> Result<Self> {
-        let wdl_type = node.field_node(syntax::TYPE)?;
-        let name = node.field_string_node(syntax::NAME)?;
-        let expression = node.field_node(syntax::EXPRESSION)?;
         Ok(Self {
-            wdl_type,
-            name,
-            expression,
+            wdl_type: node.field_node(syntax::TYPE)?,
+            name: node.field_string_node(syntax::NAME)?,
+            expression: node.field_node(syntax::EXPRESSION)?,
         })
     }
 }

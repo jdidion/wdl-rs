@@ -45,9 +45,10 @@ impl<'a> TryFrom<TSNode<'a>> for MetaObjectField {
     type Error = Error;
 
     fn try_from(mut node: TSNode<'a>) -> Result<Self> {
-        let name = node.field_node(syntax::NAME)?;
-        let value = node.field_node(syntax::VALUE)?;
-        Ok(Self { name, value })
+        Ok(Self {
+            name: node.field_node(syntax::NAME)?,
+            value: node.field_node(syntax::VALUE)?,
+        })
     }
 }
 
@@ -86,9 +87,10 @@ impl<'a> TryFrom<TSNode<'a>> for MetaAttribute {
     type Error = Error;
 
     fn try_from(mut node: TSNode<'a>) -> Result<Self> {
-        let name = node.field_node(syntax::NAME)?;
-        let value = node.field_node(syntax::VALUE)?;
-        Ok(Self { name, value })
+        Ok(Self {
+            name: node.field_node(syntax::NAME)?,
+            value: node.field_node(syntax::VALUE)?,
+        })
     }
 }
 

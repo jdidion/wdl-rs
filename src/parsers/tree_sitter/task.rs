@@ -22,9 +22,10 @@ impl<'a> TryFrom<TSNode<'a>> for RuntimeAttribute {
     type Error = Error;
 
     fn try_from(mut node: TSNode<'a>) -> Result<Self> {
-        let name = node.field_string_node(syntax::NAME)?;
-        let expression = node.field_node(syntax::EXPRESSION)?;
-        Ok(Self { name, expression })
+        Ok(Self {
+            name: node.field_string_node(syntax::NAME)?,
+            expression: node.field_node(syntax::EXPRESSION)?,
+        })
     }
 }
 
@@ -60,8 +61,9 @@ impl<'a> TryFrom<TSNode<'a>> for Task {
     type Error = Error;
 
     fn try_from(mut node: TSNode<'a>) -> Result<Self> {
-        let name = node.field_string_node(syntax::NAME)?;
-        let body = node.field_child_nodes(syntax::BODY)?;
-        Ok(Self { name, body })
+        Ok(Self {
+            name: node.field_string_node(syntax::NAME)?,
+            body: node.field_child_nodes(syntax::BODY)?,
+        })
     }
 }

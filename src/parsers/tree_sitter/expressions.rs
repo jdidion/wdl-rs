@@ -47,9 +47,10 @@ impl<'a> TryFrom<TSNode<'a>> for MapEntry {
     type Error = Error;
 
     fn try_from(mut node: TSNode<'a>) -> Result<Self> {
-        let key = node.field_node(syntax::KEY)?;
-        let value = node.field_node(syntax::VALUE)?;
-        Ok(Self { key, value })
+        Ok(Self {
+            key: node.field_node(syntax::KEY)?,
+            value: node.field_node(syntax::VALUE)?,
+        })
     }
 }
 
@@ -67,9 +68,10 @@ impl<'a> TryFrom<TSNode<'a>> for PairLiteral {
     type Error = Error;
 
     fn try_from(mut node: TSNode<'a>) -> Result<Self> {
-        let left = node.field_boxed_node(syntax::LEFT)?;
-        let right = node.field_boxed_node(syntax::RIGHT)?;
-        Ok(Self { left, right })
+        Ok(Self {
+            left: node.field_boxed_node(syntax::LEFT)?,
+            right: node.field_boxed_node(syntax::RIGHT)?,
+        })
     }
 }
 
@@ -77,9 +79,10 @@ impl<'a> TryFrom<TSNode<'a>> for ObjectField {
     type Error = Error;
 
     fn try_from(mut node: TSNode<'a>) -> Result<Self> {
-        let name = node.field_string_node(syntax::NAME)?;
-        let expression = node.field_node(syntax::EXPRESSION)?;
-        Ok(Self { name, expression })
+        Ok(Self {
+            name: node.field_string_node(syntax::NAME)?,
+            expression: node.field_node(syntax::EXPRESSION)?,
+        })
     }
 }
 
@@ -87,9 +90,10 @@ impl<'a> TryFrom<TSNode<'a>> for ObjectLiteral {
     type Error = Error;
 
     fn try_from(mut node: TSNode<'a>) -> Result<Self> {
-        let type_name = node.field_string_node(syntax::TYPE)?;
-        let fields = node.field_child_nodes(syntax::FIELDS)?;
-        Ok(Self { type_name, fields })
+        Ok(Self {
+            type_name: node.field_string_node(syntax::TYPE)?,
+            fields: node.field_child_nodes(syntax::FIELDS)?,
+        })
     }
 }
 
@@ -142,9 +146,10 @@ impl<'a> TryFrom<TSNode<'a>> for Apply {
     type Error = Error;
 
     fn try_from(mut node: TSNode<'a>) -> Result<Self> {
-        let name = node.field_string_node(syntax::NAME)?;
-        let arguments = node.field_child_nodes(syntax::ARGUMENTS)?;
-        Ok(Self { name, arguments })
+        Ok(Self {
+            name: node.field_string_node(syntax::NAME)?,
+            arguments: node.field_child_nodes(syntax::ARGUMENTS)?,
+        })
     }
 }
 
@@ -190,13 +195,10 @@ impl<'a> TryFrom<TSNode<'a>> for Ternary {
     type Error = Error;
 
     fn try_from(mut node: TSNode<'a>) -> Result<Self> {
-        let condition = node.field_boxed_node(syntax::CONDITION)?;
-        let true_branch = node.field_boxed_node(syntax::TRUE)?;
-        let false_branch = node.field_boxed_node(syntax::FALSE)?;
         Ok(Self {
-            condition,
-            true_branch,
-            false_branch,
+            condition: node.field_boxed_node(syntax::CONDITION)?,
+            true_branch: node.field_boxed_node(syntax::TRUE)?,
+            false_branch: node.field_boxed_node(syntax::FALSE)?,
         })
     }
 }
