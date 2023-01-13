@@ -1,0 +1,276 @@
+// keywords
+alias_kw = _{ "alias" }
+array_kw = _{ "Array" }
+as_kw = _{ "as" }
+call_kw = _{ "call" }
+command_kw = _{ "command" }
+else_kw = _{ "else" }
+if_kw = _{ "if" }
+in_kw = _{ "in" }
+import_kw = _{ "import" }
+input_kw = _{ "input" }
+map_kw = _{ "Map" }
+meta_kw = _{ "meta" }
+output_kw = _{ "output" }
+pair_kw = _{ "Pair" }
+parameter_meta_kw = _{ "parameter_meta" }
+runtime_kw = _{ "runtime" }
+scatter_kw = _{ "scatter" }
+struct_kw = _{ "struct" }
+task_kw = _{ "task" }
+then_kw = _{ "then" }
+version_kw = _{ "version" }
+workflow_kw = _{ "workflow" }
+
+// operators
+or = _{ "||" }
+and = _{ "&&" }
+eq = _{ "==" }
+ne = _{ "!=" }
+gte = _{ ">=" }
+gt = _{ ">" }
+lte = _{ "<=" }
+lt = _{ "<" }
+add = _{ "+" }
+sub = _{ "-" }
+mul = _{ "*" }
+div = _{ "/" }
+mod = _{ "%" }
+not = _{ "!" }
+sign = _{ pos | neg }
+pos = { "+" }
+neg = { "-" }
+
+// other hidden symbols
+optional = _{ "?" }
+non_empty = _{ "+" }
+assign = _{ "=" }
+field_sep = _{ "." }
+block_start = _{ "{" }
+block_end = _{ "}" }
+kv_sep = _{ ":" }
+group_start = _{ "(" }
+group_end = _{ ")" }
+list_start = _{ "[" }
+list_end = _{ "]" }
+list_sep = _{ "," }
+left_heredoc = _{ "<<<" }
+right_heredoc = _{ ">>>" }
+squote = _{ "'" }
+dquote = _{ "\"" }
+escape = _{ "\\" }
+tilde_placeholder_start = _{ "~{" }
+dollar_placeholder_start = _{ "${" }
+
+// rules
+document = { SOI ~ version ~ document_element* ~ EOI }
+
+version = { version_kw ~ version_identifier }
+version_identifier = @{ "1" ~ ( "." ~ ASCII_DIGIT+ )+ }
+
+document_element = { import | structdef | task | workflow }
+
+import = { import_kw ~ simple_string ~ namespace? ~ alias* }
+namespace = { as_kw ~ identifier }
+alias = { alias_kw ~ identifier ~ as_kw ~ identifier }
+
+structdef = { struct_kw ~ identifier ~ block_start ~ unbound_declaration* ~ block_end }
+
+task = { task_kw ~ identifier ~ block_start ~ task_element* ~ block_end }
+task_element = _{ input | output | meta | parameter_meta | command | runtime }
+
+command = { command_kw ~ ( command_heredoc | command_block ) }
+
+command_heredoc = ${ left_heredoc ~ (
+    command_heredoc_escape_sequence | 
+    tilde_placeholder |
+    command_heredoc_literal_sequence 
+)* ~ right_heredoc }
+command_heredoc_escape_sequence = @{ escape ~ ( ">" | "~" | "\\" ) }
+command_heredoc_literal_sequence = @{ ">" | ">>" | ">"{4,} | ( !( ">" | left_heredoc | escape ) ~ ANY )+ }
+
+command_block = { single_line_command_block | multi_line_command_block }
+command_block_escape_sequence = @{ escape ~ ( "}" | "~" | "$" | "\\" ) }
+
+single_line_command_block = ${ block_start ~  (
+    command_block_escape_sequence |
+    tilde_placeholder |
+    dollar_placeholder |
+    single_line_command_block_literal_sequence
+) ~ block_end }
+single_line_command_block_literal_sequence = @{ 
+    ( !( block_end | tilde_placeholder_start | dollar_placeholder_start | escape | NEWLINE ) ~ ANY )+ 
+}
+
+// Pest parsers are greedy, WDL doesn't require '}' to be escaped within a command block, and
+// there is no requirement that braces be matched within a command block, so we must impose
+// the limitation that the end brace is on a line by itself.
+multi_line_command_block = ${ block_start ~ ( 
+    command_block_escape_sequence |
+    tilde_placeholder |
+    dollar_placeholder |
+    multi_line_command_block_literal_sequence
+)* ~ multi_line_command_block_end }
+multi_line_command_block_literal_sequence = @{ 
+    ( !( tilde_placeholder_start | dollar_placeholder_start | escape | multi_line_command_block_end ) ~ ANY )+ | "\\"
+}
+multi_line_command_block_end = @{ NEWLINE ~ indent* ~ block_end }
+
+runtime = { runtime_kw ~ block_start ~ runtime_attribute* ~ block_end }
+runtime_attribute = { identifier ~ kv_sep ~ expression }
+
+workflow = { workflow_kw ~ identifier ~ block_start ~ workflow_element* ~ block_end }
+workflow_element = _{ input | output | meta | parameter_meta | workflow_body_element }
+workflow_body_element = _{ call | scatter | conditional }
+
+call = { call_kw ~ qualified_identifier ~ call_alias? ~ ( block_start ~ call_inputs? ~ block_end )? }
+call_alias = { as_kw ~ identifier }
+call_inputs = { input_kw ~ kv_sep ~ ( call_input ~ list_sep )* ~ ( call_input ~ list_sep? )? }
+call_input = { identifier ~ ( assign ~ expression )? }
+
+scatter = { scatter_kw ~ group_start ~ identifier ~ in_kw ~ expression ~ group_end ~ 
+    block_start ~ workflow_body_element* ~ block_end }
+conditional = { if_kw ~ group_start ~ expression ~ group_end ~ 
+    block_start ~ workflow_body_element* ~ block_end }
+
+input = { input_kw ~ block_start ~ ( bound_declaration | unbound_declaration )* ~ block_end }
+output = { output_kw ~ block_start ~ bound_declaration* ~ block_end }
+
+unbound_declaration = { typedef ~ identifier }
+bound_declaration = { typedef ~ identifier ~ assign ~ expression }
+
+typedef = { optional_type | required_type }
+optional_type = { required_type ~ optional }
+required_type = _{ primitive_type | array_type | map_type | pair_type | user_type }
+primitive_type = { "Boolean" | "Int" | "Float" | "String" | "File" | "Object" }
+array_type = _{ non_empty_array_type | maybe_empty_array_type }
+non_empty_array_type = { maybe_empty_array_type ~ non_empty }
+maybe_empty_array_type = { array_kw ~ list_start ~ typedef ~ list_end }
+map_type = { map_kw ~ list_start ~ typedef ~ list_sep ~ typedef ~ list_end }
+pair_type = { pair_kw ~ list_start ~ typedef ~ list_sep ~ typedef ~ list_end }
+user_type = { identifier }
+
+// rules cannot be left-recursive, so expression starts at the lowest precedence and
+// calls rules of successively higher precedence
+expression = { ternary | disjunction }
+ternary = { if_kw ~ expression ~ then_kw ~ expression ~ else_kw ~ expression }
+disjunction = { conjunction ~ ( or ~ conjunction )* }
+conjunction = { equality ~ ( and ~ equality )* }
+equality = _{ equal | not_equal | comparison }
+equal = { comparison ~ ( eq ~ comparison )+ }
+not_equal = { comparison ~ ( ne ~ comparison )+ }
+comparison = _{ greater_than_or_equal | less_than_or_equal | greater_than | less_than | math1 }
+greater_than_or_equal = { math1 ~ ( gte ~ math1 )+ }
+less_than_or_equal = { math1 ~ ( lte ~ math1 )+ }
+greater_than = { math1 ~ ( gt ~ math1 )+ }
+less_than = { math1 ~ ( lt ~ math1 )+ }
+math1 = _{ addition | subtraction | math2 }
+addition = { math2 ~ ( add ~ math2 )+ }
+subtraction = { math2 ~ ( sub ~ math2 )+ }
+math2 = _{ multiplication | division | remainder | unary }
+multiplication = { unary ~ ( mul ~ unary )+ }
+division = { unary ~ ( div ~ unary )+ }
+remainder = { unary ~ ( mod ~ unary )+ }
+unary = _{ negation | inversion | function }
+negation = { sign ~ function }
+inversion = { not ~ function }
+function = _{ apply | access | primary }
+apply = { identifier ~ group_start ~ 
+    ( expression ~ list_sep )* ~ ( expression ~ list_sep? )? ~ 
+group_end }
+access = { primary ~ ( index | field )+ }
+primary = _{ literal | identifier | group }
+literal = _{ none | boolean | int | float | string | array | map | pair | object }
+none = { "None" }
+group = { group_start ~ expression ~ group_end }
+index = { list_start ~ expression ~ list_end }
+field = { field_sep ~ identifier }
+
+string = { squote_string | dquote_string }
+
+squote_string = ${ squote ~ ( 
+    squote_escape_sequence | tilde_placeholder | dollar_placeholder | squote_literal 
+)* ~ squote }
+squote_escape_sequence = @{ escape ~ ( "'" | "n" | "t" | "~" | "$" | "\\" | number_escape_sequence ) }
+squote_literal = @{ 
+    ( !( squote | tilde_placeholder_start | dollar_placeholder_start | escape | NEWLINE ) ~ ANY )+ 
+}
+
+dquote_string = ${ dquote ~ ( 
+    dquote_escape_sequence | tilde_placeholder | dollar_placeholder | dquote_literal 
+)* ~ dquote }
+dquote_escape_sequence = @{ escape ~ ( "\"" | "n" | "t" | "~" | "$" | "\\" | number_escape_sequence ) }
+dquote_literal = @{ 
+    ( !( dquote | tilde_placeholder_start | dollar_placeholder_start | escape | NEWLINE ) ~ ANY )+ 
+}
+
+tilde_placeholder = !{ tilde_placeholder_start ~ expression ~ block_end }
+dollar_placeholder = !{ dollar_placeholder_start ~ expression ~ block_end }
+
+array = { list_start ~ ( expression ~ list_sep )* ~ ( expression ~ list_sep? )? ~ list_end }
+
+map = { block_start ~ ( map_entry ~ list_sep )* ~ ( map_entry ~ list_sep? )? ~ block_end }
+map_entry = { expression ~ kv_sep ~ expression }
+
+pair = { group_start ~ expression ~ list_sep ~ expression ~ group_end }
+
+object = { 
+    identifier ~ block_start ~ 
+    ( object_field ~ list_sep )* ~ ( object_field ~ list_sep? )? ~ 
+    block_end
+}
+object_field = { identifier ~ kv_sep ~ expression }
+
+meta = { meta_kw ~ block_start ~ meta_attribute* ~ block_end }
+parameter_meta = { parameter_meta_kw ~ block_start ~ meta_attribute* ~ block_end }
+meta_attribute = { identifier ~ kv_sep ~ meta_value }
+meta_value = _{ null | boolean | meta_number | simple_string | meta_array | meta_object }
+null = { "null" }
+meta_number = { sign? ~ ( int | float ) }
+meta_array = { list_start ~ ( meta_value ~ list_sep )* ~ ( meta_value ~ list_sep? )? ~ list_end }
+meta_object = { 
+    block_start ~ ( meta_object_field ~ list_sep )* ~ ( meta_object_field ~ list_sep? )? ~ block_end
+}
+meta_object_field = { identifier ~ kv_sep ~ meta_value }
+
+boolean = _{ true_literal | false_literal }
+true_literal = { "true" }
+false_literal = { "false" }
+
+int = { dec_int | oct_int | hex_int }
+dec_int = @{ ASCII_DIGIT+ }
+oct_int = @{ ^"0o" ~ ASCII_OCT_DIGIT+ }
+hex_int = @{ ^"0x" ~ ASCII_HEX_DIGIT }
+
+float = @{ ( float_digits ~ exponent? ) | ( ASCII_DIGIT+ ~ exponent ) }
+float_digits = { ( ASCII_DIGIT* ~ "." ~ ASCII_DIGIT+ ) | ( ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT* ) }
+exponent = { ^"e" ~ sign? ~ ASCII_DIGIT+ }
+
+simple_string = _{ simple_squote_string | simple_dquote_string }
+
+simple_squote_string = ${ squote ~ ( simple_squote_escape_sequence | simple_squote_literal )* ~ squote }
+simple_squote_escape_sequence = @{ escape ~ ( "'" | "t" | "n" | "\\" | number_escape_sequence ) }
+simple_squote_literal = @{ ( !( squote | escape | NEWLINE ) ~ ANY )+ }
+
+simple_dquote_string = ${ dquote ~ ( simple_dquote_escape_sequence | simple_dquote_literal )* ~ dquote }
+simple_dquote_escape_sequence = @{ escape ~ ( "\"" | "t" | "n" | "\\" | number_escape_sequence ) }
+simple_dquote_literal = @{ ( !( dquote | escape | NEWLINE ) ~ ANY )+ }
+
+number_escape_sequence = @{
+    ( "u" ~ ASCII_HEX_DIGIT{4} ) |
+    ( "U" ~ ASCII_HEX_DIGIT{8} ) |
+    ( "x" ~ ASCII_HEX_DIGIT{2} ) |
+    ASCII_OCT_DIGIT{3}
+}
+
+qualified_identifier = { ( identifier ~ field_sep )* ~ identifier }
+identifier = @{ ASCII_ALPHA ~ ( ASCII_ALPHANUMERIC | "_" )* }
+
+// comment-text is non-silent because we want to retain comments in the AST
+COMMENT = { comment_start ~ comment_text ~ comment_end }
+comment_start = _{ "#" }
+comment_text = @{ ( !NEWLINE ~ ANY )* }
+comment_end = _{ NEWLINE }
+
+WHITESPACE = _{ indent | NEWLINE }
+indent = { " " | "\t" }
