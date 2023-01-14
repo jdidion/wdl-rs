@@ -8,18 +8,16 @@ mod task;
 mod workflow;
 
 use crate::{
-    ast::{Document, DocumentSource, Node},
+    ast::{Document, DocumentSource, Location, Node},
     parsers::WdlParser,
 };
 use anyhow::{anyhow, bail, ensure, Context, Error, Result};
-use std::{collections::HashSet, ops::Range, str::FromStr};
+use std::{collections::HashSet, str::FromStr};
 use tree_sitter as ts;
 use tree_sitter_wdl_1::language as wdl1_language;
 
-//use smartstring::{LazyCompact, SmartString};
-//pub type Str = SmartString<LazyCompact>;
-/// TODO: look into different set/hashing implementations, e.g. FNV
-//pub type StrSet = HashSet<Str>;
+// TODO: create attribute macro for implementations of `TryFrom<TSNode>` that check the node's
+// `kind` against the list of valid kinds specified as a parameter to the attribute.
 
 // TODO: need to handle these cases for all nodes:
 // if node.is_error() {}
@@ -45,8 +43,22 @@ impl<'a> TSNode<'a> {
         self.node.kind()
     }
 
-    pub fn span(&self) -> Range<usize> {
-        self.node.byte_range()
+    pub fn span(&self) -> (Location, Location) {
+        let start = self.node.start_position();
+        let end = self.node.end_position();
+        let span = self.node.byte_range();
+        (
+            Location {
+                line: start.row,
+                column: start.column,
+                offset: span.start,
+            },
+            Location {
+                line: end.row,
+                column: end.column,
+                offset: span.end,
+            },
+        )
     }
 
     pub fn try_as_str(&self) -> Result<&'a str> {
@@ -124,10 +136,14 @@ impl<'a> TSNode<'a> {
         name: &str,
     ) -> Result<Node<T>> {
         let ts_node = self.field(name)?;
-        let span = ts_node.span();
+        let (start, end) = ts_node.span();
         let element_str = ts_node.try_as_str()?;
         let element = T::from_str(element_str)?;
-        Ok(Node { element, span })
+        Ok(Node {
+            element,
+            start,
+            end,
+        })
     }
 
     pub fn field_child_nodes<T: TryFrom<TSNode<'a>, Error = Error>>(
@@ -171,10 +187,11 @@ impl<'a, T: TryFrom<TSNode<'a>, Error = Error>> TryFrom<TSNode<'a>> for Node<T> 
     type Error = Error;
 
     fn try_from(value: TSNode<'a>) -> Result<Self> {
-        let span = value.span();
+        let (start, end) = value.span();
         Ok(Self {
             element: value.try_into()?,
-            span,
+            start,
+            end,
         })
     }
 }

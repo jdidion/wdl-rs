@@ -7,16 +7,19 @@ mod task;
 mod workflow;
 
 use crate::{
-    ast::{Document, DocumentSource, Node},
+    ast::{Document, DocumentSource, Location, Node},
     parsers::WdlParser,
 };
 use anyhow::{bail, Context, Error, Result};
 use pest::{
     iterators::{Pair, Pairs},
-    Parser,
+    Parser, Position,
 };
 use pest_derive;
 use std::str::FromStr;
+
+// TODO: create attribute macro for implementations of `TryFrom<Pair>` that check the pair's
+// rule against the list of valid rules specified as a parameter to the attribute.
 
 #[derive(pest_derive::Parser)]
 #[grammar = "parsers/pest/wdl.pest"]
@@ -36,6 +39,17 @@ impl WdlParser for PestParser {
             Ok(doc)
         } else {
             bail!("Document is empty")
+        }
+    }
+}
+
+impl<'a> From<Position<'a>> for Location {
+    fn from(value: Position<'a>) -> Self {
+        let (line, column) = value.line_col();
+        Self {
+            line,
+            column,
+            offset: value.pos(),
         }
     }
 }
@@ -70,7 +84,8 @@ impl<'a> PairExt<'a> for Pair<'a, Rule> {
         let element = self.as_string();
         Ok(Node {
             element,
-            span: span.start()..span.end(),
+            start: span.start_pos().into(),
+            end: span.end_pos().into(),
         })
     }
 
@@ -79,7 +94,8 @@ impl<'a> PairExt<'a> for Pair<'a, Rule> {
         let element = T::from_str(self.as_str())?;
         Ok(Node {
             element,
-            span: span.start()..span.end(),
+            start: span.start_pos().into(),
+            end: span.end_pos().into(),
         })
     }
 
@@ -177,7 +193,8 @@ impl<'a, T: TryFrom<Pair<'a, Rule>, Error = Error>> TryFrom<Pair<'a, Rule>> for 
         let span = pair.as_span();
         Ok(Self {
             element: pair.try_into()?,
-            span: span.start()..span.end(),
+            start: span.start_pos().into(),
+            end: span.end_pos().into(),
         })
     }
 }

@@ -161,11 +161,12 @@ impl<'a> TryFrom<TSNode<'a>> for Access {
             syntax::INDEX_EXPRESSION => {
                 let collection = node.field_boxed_node(syntax::COLLECTION)?;
                 let index_field = node.field(syntax::INDEX)?;
-                let index_span = index_field.span();
+                let (index_start, index_end) = index_field.span();
                 let index_operation = AccessOperation::Index(index_field.try_into()?);
                 let index = Node {
                     element: index_operation,
-                    span: index_span,
+                    start: index_start,
+                    end: index_end,
                 };
                 Ok(Self {
                     collection,
@@ -175,11 +176,12 @@ impl<'a> TryFrom<TSNode<'a>> for Access {
             syntax::FIELD_EXPRESSION => {
                 let collection = node.field_boxed_node(syntax::COLLECTION)?;
                 let field_field = node.field(syntax::NAME)?;
-                let field_span = field_field.span();
+                let (field_start, field_end) = field_field.span();
                 let field_operation = AccessOperation::Field(field_field.try_as_string()?);
                 let field = Node {
                     element: field_operation,
-                    span: field_span,
+                    start: field_start,
+                    end: field_end,
                 };
                 Ok(Self {
                     collection,

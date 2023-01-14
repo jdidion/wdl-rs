@@ -1,13 +1,8 @@
 use anyhow::{bail, ensure, Error, Result};
 use regex::Regex;
 use std::{
-    collections::HashSet,
-    convert::TryInto,
-    fmt::Display,
-    mem::discriminant,
-    ops::{Deref, Range},
-    path::PathBuf,
-    str::FromStr,
+    collections::HashSet, convert::TryInto, fmt::Display, mem::discriminant, ops::Deref,
+    path::PathBuf, str::FromStr,
 };
 
 // operators
@@ -28,14 +23,26 @@ pub const AND: &str = "&&";
 pub const OR: &str = "||";
 pub const NOT: &str = "!";
 
+#[derive(Debug)]
+pub struct Location {
+    /// Line of the source file
+    pub line: usize,
+    /// Column of the source line
+    pub column: usize,
+    /// Absolute byte offset
+    pub offset: usize,
+}
+
 /// Wrapper around a syntax element of type `T` that also encapsulates the source tree-sitter node.
 /// This is useful for retaining source code position information in the AST. `Deref`s to `T`.
 #[derive(Debug)]
 pub struct Node<T> {
     /// The AST element.
     pub element: T,
-    /// The span of byte offsets in the source document from which this node was derived.
-    pub span: Range<usize>,
+    /// The starting position in the source document from which this node was derived.
+    pub start: Location,
+    /// The ending position in the source document from which this node was derived.
+    pub end: Location,
 }
 
 impl<'a, T> Deref for Node<T> {
