@@ -71,14 +71,14 @@ impl<'a> TryFrom<Pair<'a, Rule>> for MetaObject {
 fn pest_meta_number(pair: Pair<Rule>, negate: bool) -> Result<MetaValue> {
     let n = match pair.as_rule() {
         Rule::int => {
-            let mut i = Integer::try_from(pair)?;
+            let mut i: Integer = pair.try_into()?;
             if negate {
                 i.negate()?;
             }
             MetaValue::Int(i)
         }
         Rule::float => {
-            let mut f = Float::try_from(pair)?;
+            let mut f: Float = pair.try_into()?;
             if negate {
                 f.negate()?;
             }
@@ -108,9 +108,9 @@ impl<'a> TryFrom<Pair<'a, Rule>> for MetaValue {
                     _ => pest_meta_number(first_pair, false)?,
                 }
             }
-            Rule::simple_string => Self::String(MetaString::try_from(pair)?),
-            Rule::meta_array => Self::Array(MetaArray::try_from(pair)?),
-            Rule::meta_object => Self::Object(MetaObject::try_from(pair)?),
+            Rule::simple_string => Self::String(pair.try_into()?),
+            Rule::meta_array => Self::Array(pair.try_into()?),
+            Rule::meta_object => Self::Object(pair.try_into()?),
             _ => bail!("Ivalid meta value {:?}", pair),
         };
         Ok(value)

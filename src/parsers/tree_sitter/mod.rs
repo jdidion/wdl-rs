@@ -12,7 +12,7 @@ use crate::{
     parsers::WdlParser,
 };
 use anyhow::{anyhow, bail, ensure, Context, Error, Result};
-use std::{ops::Range, str::FromStr};
+use std::{collections::HashSet, ops::Range, str::FromStr};
 use tree_sitter as ts;
 use tree_sitter_wdl_1::language as wdl1_language;
 
@@ -25,6 +25,10 @@ use tree_sitter_wdl_1::language as wdl1_language;
 // if node.is_error() {}
 // if node.is_missing() {}
 // if node.is_extra() {}
+
+trait FromTSNode {
+    fn nodes() -> HashSet<&'static str>;
+}
 
 #[derive(Debug)]
 pub struct TSNode<'a> {
@@ -59,7 +63,7 @@ impl<'a> TSNode<'a> {
         self.node
             .named_children(cursor)
             .map(|node| TSNode::new(node, self.text))
-            .map(|node| T::try_from(node))
+            .map(|node| node.try_into())
             .collect()
     }
 
@@ -87,7 +91,7 @@ impl<'a> TSNode<'a> {
         name: &str,
     ) -> Result<Node<T>> {
         let field_node = self.field(name)?;
-        Node::try_from(field_node)
+        field_node.try_into()
     }
 
     pub fn get_field_node<T: TryFrom<TSNode<'a>, Error = Error>>(
@@ -95,7 +99,7 @@ impl<'a> TSNode<'a> {
         name: &str,
     ) -> Result<Option<Node<T>>> {
         let field_node = self.get_field(name);
-        field_node.map(|node| Node::try_from(node)).transpose()
+        field_node.map(|node| node.try_into()).transpose()
     }
 
     pub fn field_boxed_node<T: TryFrom<TSNode<'a>, Error = Error>>(
@@ -112,7 +116,7 @@ impl<'a> TSNode<'a> {
 
     pub fn field_string_node(&mut self, name: &str) -> Result<Node<String>> {
         let ts_node = self.field(name)?;
-        Node::try_from(ts_node)
+        ts_node.try_into()
     }
 
     pub fn field_string_into_node<T: FromStr<Err = Error>>(
@@ -169,7 +173,7 @@ impl<'a, T: TryFrom<TSNode<'a>, Error = Error>> TryFrom<TSNode<'a>> for Node<T> 
     fn try_from(value: TSNode<'a>) -> Result<Self> {
         let span = value.span();
         Ok(Self {
-            element: T::try_from(value)?,
+            element: value.try_into()?,
             span,
         })
     }
@@ -209,7 +213,7 @@ impl WdlParser for TreeSitterParser {
             "Expected root node to be document, not {:?}",
             root
         );
-        let mut doc = Document::try_from(root)?;
+        let mut doc: Document = root.try_into()?;
         doc.source = source;
         doc.validate()?;
         Ok(doc)

@@ -1,5 +1,5 @@
 use crate::{
-    ast::{Command, Input, Meta, Output, Runtime, RuntimeAttribute, Task, TaskElement},
+    ast::{Command, Runtime, RuntimeAttribute, Task, TaskElement},
     parsers::pest::{PairExt, PairsExt, Rule},
 };
 use anyhow::{bail, Error, Result};
@@ -44,12 +44,12 @@ impl<'a> TryFrom<Pair<'a, Rule>> for TaskElement {
 
     fn try_from(pair: Pair<Rule>) -> Result<Self> {
         let e = match pair.as_rule() {
-            Rule::input => Self::Input(Input::try_from(pair)?),
-            Rule::output => Self::Output(Output::try_from(pair)?),
-            Rule::meta => Self::Meta(Meta::try_from(pair)?),
-            Rule::parameter_meta => Self::ParameterMeta(Meta::try_from(pair)?),
-            Rule::command => Self::Command(Command::try_from(pair)?),
-            Rule::runtime => Self::Runtime(Runtime::try_from(pair)?),
+            Rule::input => Self::Input(pair.try_into()?),
+            Rule::output => Self::Output(pair.try_into()?),
+            Rule::meta => Self::Meta(pair.try_into()?),
+            Rule::parameter_meta => Self::ParameterMeta(pair.try_into()?),
+            Rule::command => Self::Command(pair.try_into()?),
+            Rule::runtime => Self::Runtime(pair.try_into()?),
             _ => bail!("Invalid task element {:?}", pair),
         };
         Ok(e)

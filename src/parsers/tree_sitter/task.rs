@@ -1,8 +1,5 @@
 use crate::{
-    ast::{
-        BoundDeclaration, Command, Input, Meta, Output, Runtime, RuntimeAttribute, Task,
-        TaskElement,
-    },
+    ast::{Command, Runtime, RuntimeAttribute, Task, TaskElement},
     parsers::tree_sitter::{syntax, TSNode},
 };
 use anyhow::{bail, Error, Result};
@@ -44,13 +41,13 @@ impl<'a> TryFrom<TSNode<'a>> for TaskElement {
 
     fn try_from(node: TSNode<'a>) -> Result<Self> {
         let element = match node.kind() {
-            syntax::INPUT => Self::Input(Input::try_from(node)?),
-            syntax::OUTPUT => Self::Output(Output::try_from(node)?),
-            syntax::BOUND_DECLARATION => Self::Declaration(BoundDeclaration::try_from(node)?),
-            syntax::COMMAND => Self::Command(Command::try_from(node)?),
-            syntax::RUNTIME => Self::Runtime(Runtime::try_from(node)?),
-            syntax::META => Self::Meta(Meta::try_from(node)?),
-            syntax::PARAMETER_META => Self::Meta(Meta::try_from(node)?),
+            syntax::INPUT => Self::Input(node.try_into()?),
+            syntax::OUTPUT => Self::Output(node.try_into()?),
+            syntax::BOUND_DECLARATION => Self::Declaration(node.try_into()?),
+            syntax::COMMAND => Self::Command(node.try_into()?),
+            syntax::RUNTIME => Self::Runtime(node.try_into()?),
+            syntax::META => Self::Meta(node.try_into()?),
+            syntax::PARAMETER_META => Self::Meta(node.try_into()?),
             _ => bail!("Invalid Task element {:?}", node),
         };
         Ok(element)

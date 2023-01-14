@@ -1,8 +1,5 @@
 use crate::{
-    ast::{
-        Alias, Document, DocumentElement, DocumentSource, Import, Namespace, Node, Struct, Task,
-        Version, Workflow,
-    },
+    ast::{Alias, Document, DocumentElement, DocumentSource, Import, Namespace, Struct, Version},
     parsers::tree_sitter::{syntax, TSNode},
 };
 use anyhow::{bail, Error, Result};
@@ -22,7 +19,7 @@ impl<'a> TryFrom<TSNode<'a>> for Namespace {
     type Error = Error;
 
     fn try_from(node: TSNode<'a>) -> Result<Self> {
-        Ok(Self::Explicit(Node::try_from(node)?))
+        Ok(Self::Explicit(node.try_into()?))
     }
 }
 
@@ -72,10 +69,10 @@ impl<'a> TryFrom<TSNode<'a>> for DocumentElement {
 
     fn try_from(node: TSNode<'a>) -> Result<Self> {
         let element = match node.kind() {
-            syntax::IMPORT => Self::Import(Import::try_from(node)?),
-            syntax::STRUCT => Self::Struct(Struct::try_from(node)?),
-            syntax::TASK => Self::Task(Task::try_from(node)?),
-            syntax::WORKFLOW => Self::Workflow(Workflow::try_from(node)?),
+            syntax::IMPORT => Self::Import(node.try_into()?),
+            syntax::STRUCT => Self::Struct(node.try_into()?),
+            syntax::TASK => Self::Task(node.try_into()?),
+            syntax::WORKFLOW => Self::Workflow(node.try_into()?),
             other => bail!("Invalid node {}", other),
         };
         Ok(element)

@@ -30,7 +30,7 @@ impl WdlParser for PestParser {
     ) -> Result<Document> {
         let mut root_pair = Self::parse(Rule::document, text.as_ref())?;
         if let Some(doc_pair) = root_pair.next() {
-            let mut doc = Document::try_from(doc_pair)?;
+            let mut doc: Document = doc_pair.try_into()?;
             doc.source = source;
             doc.validate()?;
             Ok(doc)
@@ -176,7 +176,7 @@ impl<'a, T: TryFrom<Pair<'a, Rule>, Error = Error>> TryFrom<Pair<'a, Rule>> for 
     fn try_from(pair: Pair<'a, Rule>) -> Result<Self> {
         let span = pair.as_span();
         Ok(Self {
-            element: T::try_from(pair)?,
+            element: pair.try_into()?,
             span: span.start()..span.end(),
         })
     }

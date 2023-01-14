@@ -1,7 +1,7 @@
 use crate::{
     ast::{
-        BoundDeclaration, Call, CallInput, Conditional, Input, Meta, Output, QualifiedName,
-        Scatter, Workflow, WorkflowBodyElement, WorkflowElement,
+        Call, CallInput, Conditional, QualifiedName, Scatter, Workflow, WorkflowBodyElement,
+        WorkflowElement,
     },
     parsers::tree_sitter::{syntax, TSNode},
 };
@@ -69,9 +69,9 @@ impl<'a> TryFrom<TSNode<'a>> for WorkflowBodyElement {
 
     fn try_from(node: TSNode<'a>) -> Result<Self> {
         let element = match node.kind() {
-            syntax::CALL => Self::Call(Call::try_from(node)?),
-            syntax::SCATTER => Self::Scatter(Scatter::try_from(node)?),
-            syntax::CONDITIONAL => Self::Conditional(Conditional::try_from(node)?),
+            syntax::CALL => Self::Call(node.try_into()?),
+            syntax::SCATTER => Self::Scatter(node.try_into()?),
+            syntax::CONDITIONAL => Self::Conditional(node.try_into()?),
             _ => bail!("Invalid scatter/conditional block element {:?}", node),
         };
         Ok(element)
@@ -83,14 +83,14 @@ impl<'a> TryFrom<TSNode<'a>> for WorkflowElement {
 
     fn try_from(node: TSNode<'a>) -> Result<Self> {
         let element = match node.kind() {
-            syntax::INPUT => Self::Input(Input::try_from(node)?),
-            syntax::OUTPUT => Self::Output(Output::try_from(node)?),
-            syntax::BOUND_DECLARATION => Self::Declaration(BoundDeclaration::try_from(node)?),
-            syntax::CALL => Self::Call(Call::try_from(node)?),
-            syntax::SCATTER => Self::Scatter(Scatter::try_from(node)?),
-            syntax::CONDITIONAL => Self::Conditional(Conditional::try_from(node)?),
-            syntax::META => Self::Meta(Meta::try_from(node)?),
-            syntax::PARAMETER_META => Self::Meta(Meta::try_from(node)?),
+            syntax::INPUT => Self::Input(node.try_into()?),
+            syntax::OUTPUT => Self::Output(node.try_into()?),
+            syntax::BOUND_DECLARATION => Self::Declaration(node.try_into()?),
+            syntax::CALL => Self::Call(node.try_into()?),
+            syntax::SCATTER => Self::Scatter(node.try_into()?),
+            syntax::CONDITIONAL => Self::Conditional(node.try_into()?),
+            syntax::META => Self::Meta(node.try_into()?),
+            syntax::PARAMETER_META => Self::Meta(node.try_into()?),
             _ => bail!("Invalid Task element {:?}", node),
         };
         Ok(element)

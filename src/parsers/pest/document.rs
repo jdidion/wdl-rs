@@ -1,8 +1,5 @@
 use crate::{
-    ast::{
-        Alias, Document, DocumentElement, DocumentSource, Import, Namespace, Struct, Task, Version,
-        Workflow,
-    },
+    ast::{Alias, Document, DocumentElement, DocumentSource, Import, Namespace, Struct, Version},
     parsers::pest::{PairExt, PairsExt, Rule},
 };
 use anyhow::{bail, Error, Result};
@@ -76,10 +73,10 @@ impl<'a> TryFrom<Pair<'a, Rule>> for DocumentElement {
 
     fn try_from(pair: Pair<Rule>) -> Result<Self> {
         let e = match pair.as_rule() {
-            Rule::import => Self::Import(Import::try_from(pair)?),
-            Rule::structdef => Self::Struct(Struct::try_from(pair)?),
-            Rule::task => Self::Task(Task::try_from(pair)?),
-            Rule::workflow => Self::Workflow(Workflow::try_from(pair)?),
+            Rule::import => Self::Import(pair.try_into()?),
+            Rule::structdef => Self::Struct(pair.try_into()?),
+            Rule::task => Self::Task(pair.try_into()?),
+            Rule::workflow => Self::Workflow(pair.try_into()?),
             _ => bail!("Invalid pair {}", pair),
         };
         Ok(e)

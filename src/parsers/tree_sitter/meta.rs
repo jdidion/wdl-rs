@@ -1,7 +1,7 @@
 use crate::{
     ast::{
-        Float, Integer, Meta, MetaArray, MetaAttribute, MetaObject, MetaObjectField, MetaString,
-        MetaStringPart, MetaValue,
+        Meta, MetaArray, MetaAttribute, MetaObject, MetaObjectField, MetaString, MetaStringPart,
+        MetaValue,
     },
     parsers::tree_sitter::{syntax, TSNode},
 };
@@ -70,13 +70,11 @@ impl<'a> TryFrom<TSNode<'a>> for MetaValue {
             syntax::NULL => Self::Null,
             syntax::TRUE => Self::Boolean(true),
             syntax::FALSE => Self::Boolean(false),
-            syntax::DEC_INT | syntax::OCT_INT | syntax::HEX_INT => {
-                Self::Int(Integer::try_from(node)?)
-            }
-            syntax::FLOAT => Self::Float(Float::try_from(node)?),
-            syntax::SIMPLE_STRING => Self::String(MetaString::try_from(node)?),
-            syntax::META_ARRAY => Self::Array(MetaArray::try_from(node)?),
-            syntax::META_OBJECT => Self::Object(MetaObject::try_from(node)?),
+            syntax::DEC_INT | syntax::OCT_INT | syntax::HEX_INT => Self::Int(node.try_into()?),
+            syntax::FLOAT => Self::Float(node.try_into()?),
+            syntax::SIMPLE_STRING => Self::String(node.try_into()?),
+            syntax::META_ARRAY => Self::Array(node.try_into()?),
+            syntax::META_OBJECT => Self::Object(node.try_into()?),
             _ => bail!("Invalid meta value {:?}", node),
         };
         Ok(value)

@@ -1,7 +1,7 @@
 use crate::{
     ast::{
-        Call, CallInput, Conditional, Input, Meta, Node, Output, QualifiedName, Scatter, Workflow,
-        WorkflowBodyElement, WorkflowElement,
+        Call, CallInput, Conditional, QualifiedName, Scatter, Workflow, WorkflowBodyElement,
+        WorkflowElement,
     },
     parsers::pest::{PairExt, PairsExt, Rule},
 };
@@ -27,7 +27,7 @@ impl<'a> TryFrom<Pair<'a, Rule>> for CallInput {
         let name = inner.next_string_node()?;
         let expression = inner
             .next()
-            .map(|expr_pair| Node::try_from(expr_pair))
+            .map(|expr_pair| expr_pair.try_into())
             .transpose()?;
         Ok(Self { name, expression })
     }
@@ -88,9 +88,9 @@ impl<'a> TryFrom<Pair<'a, Rule>> for WorkflowBodyElement {
 
     fn try_from(pair: Pair<Rule>) -> Result<Self> {
         let e = match pair.as_rule() {
-            Rule::call => Self::Call(Call::try_from(pair)?),
-            Rule::scatter => Self::Scatter(Scatter::try_from(pair)?),
-            Rule::conditional => Self::Conditional(Conditional::try_from(pair)?),
+            Rule::call => Self::Call(pair.try_into()?),
+            Rule::scatter => Self::Scatter(pair.try_into()?),
+            Rule::conditional => Self::Conditional(pair.try_into()?),
             _ => bail!("Invalid task element {:?}", pair),
         };
         Ok(e)
@@ -102,13 +102,13 @@ impl<'a> TryFrom<Pair<'a, Rule>> for WorkflowElement {
 
     fn try_from(pair: Pair<Rule>) -> Result<Self> {
         let e = match pair.as_rule() {
-            Rule::input => Self::Input(Input::try_from(pair)?),
-            Rule::output => Self::Output(Output::try_from(pair)?),
-            Rule::meta => Self::Meta(Meta::try_from(pair)?),
-            Rule::parameter_meta => Self::ParameterMeta(Meta::try_from(pair)?),
-            Rule::call => Self::Call(Call::try_from(pair)?),
-            Rule::scatter => Self::Scatter(Scatter::try_from(pair)?),
-            Rule::conditional => Self::Conditional(Conditional::try_from(pair)?),
+            Rule::input => Self::Input(pair.try_into()?),
+            Rule::output => Self::Output(pair.try_into()?),
+            Rule::meta => Self::Meta(pair.try_into()?),
+            Rule::parameter_meta => Self::ParameterMeta(pair.try_into()?),
+            Rule::call => Self::Call(pair.try_into()?),
+            Rule::scatter => Self::Scatter(pair.try_into()?),
+            Rule::conditional => Self::Conditional(pair.try_into()?),
             _ => bail!("Invalid task element {:?}", pair),
         };
         Ok(e)

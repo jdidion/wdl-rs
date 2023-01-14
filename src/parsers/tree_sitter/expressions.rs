@@ -1,8 +1,8 @@
 use crate::{
     ast::{
-        Access, AccessOperation, Apply, ArrayLiteral, Binary, BinaryOperator, Expression, Float,
-        Integer, MapEntry, MapLiteral, Node, ObjectField, ObjectLiteral, PairLiteral,
-        StringLiteral, StringPart, Ternary, Unary, UnaryOperator,
+        Access, AccessOperation, Apply, ArrayLiteral, Binary, BinaryOperator, Expression, MapEntry,
+        MapLiteral, Node, ObjectField, ObjectLiteral, PairLiteral, StringLiteral, StringPart,
+        Ternary, Unary, UnaryOperator,
     },
     parsers::tree_sitter::{syntax, TSNode},
 };
@@ -162,7 +162,7 @@ impl<'a> TryFrom<TSNode<'a>> for Access {
                 let collection = node.field_boxed_node(syntax::COLLECTION)?;
                 let index_field = node.field(syntax::INDEX)?;
                 let index_span = index_field.span();
-                let index_operation = AccessOperation::Index(Expression::try_from(index_field)?);
+                let index_operation = AccessOperation::Index(index_field.try_into()?);
                 let index = Node {
                     element: index_operation,
                     span: index_span,
@@ -211,25 +211,21 @@ impl<'a> TryFrom<TSNode<'a>> for Expression {
             syntax::NONE => Self::None,
             syntax::TRUE => Self::Boolean(true),
             syntax::FALSE => Self::Boolean(false),
-            syntax::DEC_INT | syntax::OCT_INT | syntax::HEX_INT => {
-                Self::Int(Integer::try_from(node)?)
-            }
-            syntax::FLOAT => Self::Float(Float::try_from(node)?),
-            syntax::STRING => Self::String(StringLiteral::try_from(node)?),
-            syntax::ARRAY => Self::Array(ArrayLiteral::try_from(node)?),
-            syntax::MAP => Self::Map(MapLiteral::try_from(node)?),
-            syntax::PAIR => Self::Pair(PairLiteral::try_from(node)?),
-            syntax::OBJECT => Self::Object(ObjectLiteral::try_from(node)?),
-            syntax::UNARY_OPERATOR | syntax::NOT_OPERATOR => Self::Unary(Unary::try_from(node)?),
+            syntax::DEC_INT | syntax::OCT_INT | syntax::HEX_INT => Self::Int(node.try_into()?),
+            syntax::FLOAT => Self::Float(node.try_into()?),
+            syntax::STRING => Self::String(node.try_into()?),
+            syntax::ARRAY => Self::Array(node.try_into()?),
+            syntax::MAP => Self::Map(node.try_into()?),
+            syntax::PAIR => Self::Pair(node.try_into()?),
+            syntax::OBJECT => Self::Object(node.try_into()?),
+            syntax::UNARY_OPERATOR | syntax::NOT_OPERATOR => Self::Unary(node.try_into()?),
             syntax::BINARY_OPERATOR
             | syntax::AND_OPERATOR
             | syntax::OR_OPERATOR
-            | syntax::COMPARISON_OPERATOR => Self::Binary(Binary::try_from(node)?),
-            syntax::APPLY_EXPRESSION => Self::Apply(Apply::try_from(node)?),
-            syntax::INDEX_EXPRESSION | syntax::FIELD_EXPRESSION => {
-                Self::Access(Access::try_from(node)?)
-            }
-            syntax::TERNARY_EXPRESSION => Self::Ternary(Ternary::try_from(node)?),
+            | syntax::COMPARISON_OPERATOR => Self::Binary(node.try_into()?),
+            syntax::APPLY_EXPRESSION => Self::Apply(node.try_into()?),
+            syntax::INDEX_EXPRESSION | syntax::FIELD_EXPRESSION => Self::Access(node.try_into()?),
+            syntax::TERNARY_EXPRESSION => Self::Ternary(node.try_into()?),
             syntax::GROUP_EXPRESSION => Self::Group(node.field_boxed_node(syntax::EXPRESSION)?),
             syntax::IDENTIFIER => Self::Identifier(node.try_as_string()?),
             _ => bail!("Invalid expression {:?}", node),

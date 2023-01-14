@@ -73,8 +73,8 @@ impl<'a> TryFrom<Pair<'a, Rule>> for InputDeclaration {
 
     fn try_from(pair: Pair<'a, Rule>) -> Result<Self> {
         let decl = match pair.as_rule() {
-            Rule::unbound_declaration => Self::Unbound(UnboundDeclaration::try_from(pair)?),
-            Rule::bound_declaration => Self::Bound(BoundDeclaration::try_from(pair)?),
+            Rule::unbound_declaration => Self::Unbound(pair.try_into()?),
+            Rule::bound_declaration => Self::Bound(pair.try_into()?),
             _ => bail!("Invalid declaration {:?}", pair),
         };
         Ok(decl)
