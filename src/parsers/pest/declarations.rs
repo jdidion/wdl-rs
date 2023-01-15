@@ -1,5 +1,5 @@
 use crate::{
-    ast::{BoundDeclaration, Input, InputDeclaration, Output, Type, UnboundDeclaration},
+    model::{BoundDeclaration, Input, InputDeclaration, Output, Type, UnboundDeclaration},
     parsers::pest::{PairExt, PairsExt, Rule},
 };
 use anyhow::{bail, Error, Ok, Result};

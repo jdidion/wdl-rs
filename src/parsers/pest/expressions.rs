@@ -1,5 +1,5 @@
 use crate::{
-    ast::{
+    model::{
         Access, AccessOperation, Apply, ArrayLiteral, Binary, BinaryOperator, Expression, MapEntry,
         MapLiteral, ObjectField, ObjectLiteral, PairLiteral, StringLiteral, StringPart, Ternary,
         Unary, UnaryOperator,

@@ -1,5 +1,5 @@
 use crate::{
-    ast::{
+    model::{
         Call, CallInput, Conditional, QualifiedName, Scatter, Workflow, WorkflowBodyElement,
         WorkflowElement,
     },

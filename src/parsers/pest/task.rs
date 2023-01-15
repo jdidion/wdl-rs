@@ -1,5 +1,5 @@
 use crate::{
-    ast::{Command, Runtime, RuntimeAttribute, Task, TaskElement},
+    model::{Command, Runtime, RuntimeAttribute, Task, TaskElement},
     parsers::pest::{PairExt, PairsExt, Rule},
 };
 use anyhow::{bail, Error, Result};

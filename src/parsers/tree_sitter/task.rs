@@ -1,5 +1,5 @@
 use crate::{
-    ast::{Command, Runtime, RuntimeAttribute, Task, TaskElement},
+    model::{Command, Runtime, RuntimeAttribute, Task, TaskElement},
     parsers::tree_sitter::{syntax, TSNode},
 };
 use anyhow::{bail, Error, Result};

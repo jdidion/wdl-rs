@@ -1,5 +1,5 @@
 use crate::{
-    ast::{BoundDeclaration, Input, InputDeclaration, Output, Type, UnboundDeclaration},
+    model::{BoundDeclaration, Input, InputDeclaration, Output, Type, UnboundDeclaration},
     parsers::tree_sitter::{syntax, TSNode},
 };
 use anyhow::{bail, Error, Result};

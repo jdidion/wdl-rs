@@ -1,5 +1,5 @@
 use crate::{
-    ast::{Float, Integer},
+    model::{Float, Integer},
     parsers::tree_sitter::{syntax, TSNode},
 };
 use anyhow::{bail, Error, Result};

@@ -1,7 +1,7 @@
 pub mod pest;
 pub mod tree_sitter;
 
-use crate::ast::{Document, DocumentSource};
+use crate::model::{Document, DocumentSource};
 use anyhow::Result;
 use std::{fs, path::Path};
 

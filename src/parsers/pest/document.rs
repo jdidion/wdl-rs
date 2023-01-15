@@ -1,5 +1,5 @@
 use crate::{
-    ast::{Alias, Document, DocumentElement, DocumentSource, Import, Namespace, Struct, Version},
+    model::{Alias, Document, DocumentElement, DocumentSource, Import, Namespace, Struct, Version},
     parsers::pest::{PairExt, PairsExt, Rule},
 };
 use anyhow::{bail, Error, Result};

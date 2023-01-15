@@ -1,5 +1,5 @@
 use crate::{
-    ast::{Float, Integer},
+    model::{Float, Integer},
     parsers::pest::{PairExt, Rule},
 };
 use anyhow::{Error, Result};

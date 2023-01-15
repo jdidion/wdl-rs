@@ -1,5 +1,5 @@
 use crate::{
-    ast::{
+    model::{
         Meta, MetaArray, MetaAttribute, MetaObject, MetaObjectField, MetaString, MetaStringPart,
         MetaValue,
     },

@@ -1,5 +1,5 @@
 use crate::{
-    ast::{Alias, Document, DocumentElement, DocumentSource, Import, Namespace, Struct, Version},
+    model::{Alias, Document, DocumentElement, DocumentSource, Import, Namespace, Struct, Version},
     parsers::tree_sitter::{syntax, TSNode},
 };
 use anyhow::{bail, Error, Result};
