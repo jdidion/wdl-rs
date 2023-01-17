@@ -3,50 +3,49 @@ use crate::{
         Call, CallInput, Conditional, QualifiedName, Scatter, Workflow, WorkflowBodyElement,
         WorkflowElement,
     },
-    parsers::pest::{PairExt, PairsExt, Rule},
+    parsers::pest::{PestNode, Rule},
 };
 use anyhow::{bail, Error, Result};
-use pest::iterators::Pair;
 use std::convert::TryFrom;
 
-impl<'a> TryFrom<Pair<'a, Rule>> for QualifiedName {
+impl<'a> TryFrom<PestNode<'a>> for QualifiedName {
     type Error = Error;
 
-    fn try_from(pair: Pair<Rule>) -> Result<Self> {
+    fn try_from(node: PestNode<'a>) -> Result<Self> {
         Ok(Self {
-            parts: pair.into_inner().collect_string_nodes()?,
+            parts: node.into_inner().collect_string_ctxs()?,
         })
     }
 }
 
-impl<'a> TryFrom<Pair<'a, Rule>> for CallInput {
+impl<'a> TryFrom<PestNode<'a>> for CallInput {
     type Error = Error;
 
-    fn try_from(pair: Pair<Rule>) -> Result<Self> {
-        let mut inner = pair.into_inner();
-        let name = inner.next_string_node()?;
+    fn try_from(node: PestNode<'a>) -> Result<Self> {
+        let mut inner = node.into_inner();
+        let name = inner.next_string_ctx()?;
         let expression = inner
             .next()
-            .map(|expr_pair| expr_pair.try_into())
+            .map(|expr_node| expr_node.try_into())
             .transpose()?;
         Ok(Self { name, expression })
     }
 }
 
-impl<'a> TryFrom<Pair<'a, Rule>> for Call {
+impl<'a> TryFrom<PestNode<'a>> for Call {
     type Error = Error;
 
-    fn try_from(pair: Pair<Rule>) -> Result<Self> {
-        let mut inner = pair.into_inner();
-        let target = inner.next_node()?;
-        let alias = if let Some(Rule::call_alias) = inner.peek().map(|pair| pair.as_rule()) {
-            let alias_pair = inner.next_pair()?;
-            Some(alias_pair.first_inner_string_node()?)
+    fn try_from(node: PestNode<'a>) -> Result<Self> {
+        let mut inner = node.into_inner();
+        let target = inner.next_ctx()?;
+        let alias = if let Some(Rule::call_alias) = inner.peek_rule() {
+            let alias_node = inner.next_node()?;
+            Some(alias_node.first_inner_string_ctx()?)
         } else {
             None
         };
-        let inputs = if let Some(inputs_pair) = inner.next() {
-            inputs_pair.into_inner().collect_nodes()?
+        let inputs = if let Some(inputs_node) = inner.next() {
+            inputs_node.into_inner().collect_ctxs()?
         } else {
             Vec::new()
         };
@@ -58,71 +57,71 @@ impl<'a> TryFrom<Pair<'a, Rule>> for Call {
     }
 }
 
-impl<'a> TryFrom<Pair<'a, Rule>> for Scatter {
+impl<'a> TryFrom<PestNode<'a>> for Scatter {
     type Error = Error;
 
-    fn try_from(pair: Pair<Rule>) -> Result<Self> {
-        let mut inner = pair.into_inner();
+    fn try_from(node: PestNode<'a>) -> Result<Self> {
+        let mut inner = node.into_inner();
         Ok(Self {
-            name: inner.next_string_node()?,
-            expression: inner.next_node()?,
-            body: inner.collect_nodes()?,
+            name: inner.next_string_ctx()?,
+            expression: inner.next_ctx()?,
+            body: inner.collect_ctxs()?,
         })
     }
 }
 
-impl<'a> TryFrom<Pair<'a, Rule>> for Conditional {
+impl<'a> TryFrom<PestNode<'a>> for Conditional {
     type Error = Error;
 
-    fn try_from(pair: Pair<Rule>) -> Result<Self> {
-        let mut inner = pair.into_inner();
+    fn try_from(node: PestNode<'a>) -> Result<Self> {
+        let mut inner = node.into_inner();
         Ok(Self {
-            expression: inner.next_node()?,
-            body: inner.collect_nodes()?,
+            expression: inner.next_ctx()?,
+            body: inner.collect_ctxs()?,
         })
     }
 }
 
-impl<'a> TryFrom<Pair<'a, Rule>> for WorkflowBodyElement {
+impl<'a> TryFrom<PestNode<'a>> for WorkflowBodyElement {
     type Error = Error;
 
-    fn try_from(pair: Pair<Rule>) -> Result<Self> {
-        let e = match pair.as_rule() {
-            Rule::call => Self::Call(pair.try_into()?),
-            Rule::scatter => Self::Scatter(pair.try_into()?),
-            Rule::conditional => Self::Conditional(pair.try_into()?),
-            _ => bail!("Invalid task element {:?}", pair),
+    fn try_from(node: PestNode<'a>) -> Result<Self> {
+        let e = match node.as_rule() {
+            Rule::call => Self::Call(node.try_into()?),
+            Rule::scatter => Self::Scatter(node.try_into()?),
+            Rule::conditional => Self::Conditional(node.try_into()?),
+            _ => bail!("Invalid task element {:?}", node),
         };
         Ok(e)
     }
 }
 
-impl<'a> TryFrom<Pair<'a, Rule>> for WorkflowElement {
+impl<'a> TryFrom<PestNode<'a>> for WorkflowElement {
     type Error = Error;
 
-    fn try_from(pair: Pair<Rule>) -> Result<Self> {
-        let e = match pair.as_rule() {
-            Rule::input => Self::Input(pair.try_into()?),
-            Rule::output => Self::Output(pair.try_into()?),
-            Rule::meta => Self::Meta(pair.try_into()?),
-            Rule::parameter_meta => Self::ParameterMeta(pair.try_into()?),
-            Rule::call => Self::Call(pair.try_into()?),
-            Rule::scatter => Self::Scatter(pair.try_into()?),
-            Rule::conditional => Self::Conditional(pair.try_into()?),
-            _ => bail!("Invalid task element {:?}", pair),
+    fn try_from(node: PestNode<'a>) -> Result<Self> {
+        let e = match node.as_rule() {
+            Rule::input => Self::Input(node.try_into()?),
+            Rule::output => Self::Output(node.try_into()?),
+            Rule::meta => Self::Meta(node.try_into()?),
+            Rule::parameter_meta => Self::ParameterMeta(node.try_into()?),
+            Rule::call => Self::Call(node.try_into()?),
+            Rule::scatter => Self::Scatter(node.try_into()?),
+            Rule::conditional => Self::Conditional(node.try_into()?),
+            _ => bail!("Invalid task element {:?}", node),
         };
         Ok(e)
     }
 }
 
-impl<'a> TryFrom<Pair<'a, Rule>> for Workflow {
+impl<'a> TryFrom<PestNode<'a>> for Workflow {
     type Error = Error;
 
-    fn try_from(pair: Pair<Rule>) -> Result<Self> {
-        let mut inner = pair.into_inner();
+    fn try_from(node: PestNode<'a>) -> Result<Self> {
+        let mut inner = node.into_inner();
         Ok(Self {
-            name: inner.next_string_node()?,
-            body: inner.collect_nodes()?,
+            name: inner.next_string_ctx()?,
+            body: inner.collect_ctxs()?,
         })
     }
 }

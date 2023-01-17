@@ -1,24 +1,23 @@
 use crate::{
     model::{Float, Integer},
-    parsers::pest::{PairExt, Rule},
+    parsers::pest::PestNode,
 };
 use anyhow::{Error, Result};
-use pest::iterators::Pair;
 use std::str::FromStr;
 
-impl<'a> TryFrom<Pair<'a, Rule>> for Integer {
+impl<'a> TryFrom<PestNode<'a>> for Integer {
     type Error = Error;
 
-    fn try_from(pair: Pair<'a, Rule>) -> Result<Self> {
-        let inner = pair.first_inner()?;
+    fn try_from(node: PestNode<'a>) -> Result<Self> {
+        let inner = node.first_inner()?;
         Self::from_str(inner.as_str())
     }
 }
 
-impl<'a> TryFrom<Pair<'a, Rule>> for Float {
+impl<'a> TryFrom<PestNode<'a>> for Float {
     type Error = Error;
 
-    fn try_from(pair: Pair<'a, Rule>) -> Result<Self> {
-        Self::from_str(pair.as_str())
+    fn try_from(node: PestNode<'a>) -> Result<Self> {
+        Self::from_str(node.as_str())
     }
 }

@@ -89,6 +89,7 @@ impl<'a> TryFrom<TSNode<'a>> for Document {
             source: DocumentSource::default(),
             version,
             body,
+            comments: node.comments.take(),
         };
         doc.validate()?;
         Ok(doc)

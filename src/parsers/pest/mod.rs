@@ -7,26 +7,209 @@ mod task;
 mod workflow;
 
 use crate::{
-    model::{Context, Document, DocumentSource, Location},
+    model::{Comments, Ctx, Document, DocumentSource, Location},
     parsers::WdlParser,
 };
-use anyhow::{bail, Context as _, Error, Result};
+use anyhow::{bail, Context, Error, Result};
 use pest::{
     iterators::{Pair, Pairs},
     Parser, Position,
 };
 use pest_derive;
-use std::{ops::Deref, str::FromStr};
+use std::{cell::RefCell, rc::Rc, str::FromStr};
 
-struct PestNode<'a> {
-    pair: Pair<'a, Rule>,
+impl<'a> From<Position<'a>> for Location {
+    fn from(value: Position<'a>) -> Self {
+        let (line, column) = value.line_col();
+        Self {
+            line,
+            column,
+            offset: value.pos(),
+        }
+    }
 }
 
-impl<'a> Deref for PestNode<'a> {
-    type Target = Pair<'a, Rule>;
+impl<'a, T: TryFrom<PestNode<'a>, Error = Error>> TryFrom<PestNode<'a>> for Ctx<T> {
+    type Error = Error;
 
-    fn deref(&self) -> &Self::Target {
-        &self.pair
+    fn try_from(node: PestNode<'a>) -> Result<Self> {
+        let (start, end) = node.as_span();
+        Ok(Self {
+            element: node.try_into()?,
+            start,
+            end,
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct PestNode<'a> {
+    pair: Pair<'a, Rule>,
+    comments: Rc<RefCell<Comments>>,
+}
+
+impl<'a> PestNode<'a> {
+    pub fn into_inner(self) -> PestNodes<'a> {
+        PestNodes {
+            pairs: self.pair.into_inner(),
+            comments: self.comments.clone(),
+        }
+    }
+
+    pub fn as_rule(&self) -> Rule {
+        self.pair.as_rule()
+    }
+
+    pub fn as_span(&self) -> (Location, Location) {
+        let span = self.pair.as_span();
+        (span.start_pos().into(), span.end_pos().into())
+    }
+
+    pub fn as_str(&self) -> &'a str {
+        self.pair.as_str()
+    }
+
+    pub fn as_string(&self) -> String {
+        self.pair.as_str().to_owned()
+    }
+
+    pub fn try_str_into_ctx<T: FromStr<Err = Error>>(self) -> Result<Ctx<T>> {
+        let span = self.pair.as_span();
+        let element = T::from_str(self.pair.as_str())?;
+        Ok(Ctx {
+            element,
+            start: span.start_pos().into(),
+            end: span.end_pos().into(),
+        })
+    }
+
+    pub fn first_inner(self) -> Result<PestNode<'a>> {
+        self.into_inner().next_node()
+    }
+
+    pub fn first_inner_string(self) -> Result<String> {
+        let pair = self.into_inner().next_node()?;
+        Ok(pair.as_str().to_owned())
+    }
+
+    pub fn first_inner_ctx<T: TryFrom<PestNode<'a>, Error = Error>>(self) -> Result<Ctx<T>> {
+        let inner = self.first_inner()?;
+        inner.try_into()
+    }
+
+    pub fn first_inner_boxed_ctx<T: TryFrom<PestNode<'a>, Error = Error>>(
+        self,
+    ) -> Result<Box<Ctx<T>>> {
+        let inner = self.first_inner()?;
+        Ok(Box::new(inner.try_into()?))
+    }
+
+    pub fn first_inner_string_ctx(self) -> Result<Ctx<String>> {
+        let pair = self.first_inner()?;
+        pair.try_into()
+    }
+}
+
+impl<'a> TryFrom<PestNode<'a>> for &'a str {
+    type Error = Error;
+
+    fn try_from(value: PestNode<'a>) -> Result<Self> {
+        Ok(value.pair.as_str())
+    }
+}
+
+impl<'a> TryFrom<PestNode<'a>> for String {
+    type Error = Error;
+
+    fn try_from(value: PestNode<'a>) -> Result<Self> {
+        Ok(value.pair.as_str().to_owned())
+    }
+}
+
+pub struct PestNodes<'a> {
+    pairs: Pairs<'a, Rule>,
+    comments: Rc<RefCell<Comments>>,
+}
+
+impl<'a> PestNodes<'a> {
+    fn get_next_pair(&mut self) -> Option<Pair<'a, Rule>> {
+        while let Some(pair) = self.pairs.next() {
+            if pair.as_rule() == Rule::COMMENT {
+                let span = pair.as_span();
+                let start: Location = span.start_pos().into();
+                let end: Location = span.end_pos().into();
+                let mut comments = self.comments.borrow_mut();
+                comments
+                    .add(
+                        start.line,
+                        Ctx {
+                            element: pair.as_str().to_owned(),
+                            start,
+                            end,
+                        },
+                    )
+                    .ok();
+            } else {
+                return Some(pair);
+            }
+        }
+        None
+    }
+
+    pub fn next_node(&mut self) -> Result<PestNode<'a>> {
+        self.next().context("Expected next pair")
+    }
+
+    pub fn peek_rule(&self) -> Option<Rule> {
+        self.pairs.peek().map(|pair| pair.as_rule())
+    }
+
+    pub fn collect_ctxs<T: TryFrom<PestNode<'a>, Error = Error>>(self) -> Result<Vec<Ctx<T>>> {
+        self.map(|node| node.try_into()).collect()
+    }
+
+    pub fn collect_string_ctxs(self) -> Result<Vec<Ctx<String>>> {
+        self.map(|node| node.try_into()).collect()
+    }
+
+    pub fn next_ctx<T: TryFrom<PestNode<'a>, Error = Error>>(&mut self) -> Result<Ctx<T>> {
+        let node = self.next_node()?;
+        node.try_into()
+    }
+
+    pub fn next_boxed_ctx<T: TryFrom<PestNode<'a>, Error = Error>>(
+        &mut self,
+    ) -> Result<Box<Ctx<T>>> {
+        let node = self.next_node()?;
+        Ok(Box::new(node.try_into()?))
+    }
+
+    pub fn next_string_ctx(&mut self) -> Result<Ctx<String>> {
+        let node = self.next_node()?;
+        node.try_into()
+    }
+
+    pub fn next_str_into_ctx<T: FromStr<Err = Error>>(&mut self) -> Result<Ctx<T>> {
+        let node = self.next_node()?;
+        node.try_str_into_ctx()
+    }
+}
+
+impl<'a> Iterator for PestNodes<'a> {
+    type Item = PestNode<'a>;
+
+    fn next(&mut self) -> Option<PestNode<'a>> {
+        self.get_next_pair().map(|pair| PestNode {
+            pair,
+            comments: self.comments.clone(),
+        })
+    }
+}
+
+impl<'a> Drop for PestNodes<'a> {
+    fn drop(&mut self) {
+        // drains the iterator to ensure all comment pairs are added to `self.comments`
+        for _ in self {}
     }
 }
 
@@ -41,169 +224,18 @@ impl WdlParser for PestParser {
         source: DocumentSource,
     ) -> Result<Document> {
         let mut root_pair = Self::parse(Rule::document, text.as_ref())?;
-        if let Some(doc_pair) = root_pair.next() {
-            let mut doc: Document = doc_pair.try_into()?;
+        let comments = Rc::new(RefCell::new(Comments::new()));
+        if let Some(pair) = root_pair.next() {
+            let node = PestNode {
+                pair,
+                comments: comments.clone(),
+            };
+            let mut doc: Document = node.try_into()?;
             doc.source = source;
             doc.validate()?;
             Ok(doc)
         } else {
             bail!("Document is empty")
         }
-    }
-}
-
-impl<'a> From<Position<'a>> for Location {
-    fn from(value: Position<'a>) -> Self {
-        let (line, column) = value.line_col();
-        Self {
-            line,
-            column,
-            offset: value.pos(),
-        }
-    }
-}
-
-trait PairExt<'a> {
-    fn as_string(&self) -> String;
-
-    fn try_into_string_node(self) -> Result<Context<String>>;
-
-    fn try_str_into_node<T: FromStr<Err = Error>>(self) -> Result<Context<T>>;
-
-    fn first_inner(self) -> Result<Pair<'a, Rule>>;
-
-    fn first_inner_string(self) -> Result<String>;
-
-    fn first_inner_node<T: TryFrom<Pair<'a, Rule>, Error = Error>>(self) -> Result<Context<T>>;
-
-    fn first_inner_boxed_node<T: TryFrom<Pair<'a, Rule>, Error = Error>>(
-        self,
-    ) -> Result<Box<Context<T>>>;
-
-    fn first_inner_string_node(self) -> Result<Context<String>>;
-}
-
-impl<'a> PairExt<'a> for Pair<'a, Rule> {
-    fn as_string(&self) -> String {
-        self.as_str().to_owned()
-    }
-
-    fn try_into_string_node(self) -> Result<Context<String>> {
-        let span = self.as_span();
-        let element = self.as_string();
-        Ok(Context {
-            element,
-            start: span.start_pos().into(),
-            end: span.end_pos().into(),
-        })
-    }
-
-    fn try_str_into_node<T: FromStr<Err = Error>>(self) -> Result<Context<T>> {
-        let span = self.as_span();
-        let element = T::from_str(self.as_str())?;
-        Ok(Context {
-            element,
-            start: span.start_pos().into(),
-            end: span.end_pos().into(),
-        })
-    }
-
-    fn first_inner(self) -> Result<Pair<'a, Rule>> {
-        self.into_inner()
-            .next()
-            .context("Expected pair to have at least one inner node")
-    }
-
-    fn first_inner_string(self) -> Result<String> {
-        let pair = self.first_inner()?;
-        Ok(pair.as_string())
-    }
-
-    fn first_inner_node<T: TryFrom<Pair<'a, Rule>, Error = Error>>(self) -> Result<Context<T>> {
-        let inner = self.first_inner()?;
-        inner.try_into()
-    }
-
-    fn first_inner_boxed_node<T: TryFrom<Pair<'a, Rule>, Error = Error>>(
-        self,
-    ) -> Result<Box<Context<T>>> {
-        let inner = self.first_inner()?;
-        Ok(Box::new(inner.try_into()?))
-    }
-
-    fn first_inner_string_node(self) -> Result<Context<String>> {
-        let pair = self.first_inner()?;
-        pair.try_into_string_node()
-    }
-}
-
-trait PairsExt<'a> {
-    fn next_pair(&mut self) -> Result<Pair<'a, Rule>>;
-
-    fn collect_nodes<T: TryFrom<Pair<'a, Rule>, Error = Error>>(self) -> Result<Vec<Context<T>>>;
-
-    fn collect_string_nodes(self) -> Result<Vec<Context<String>>>;
-
-    fn next_node<T: TryFrom<Pair<'a, Rule>, Error = Error>>(&mut self) -> Result<Context<T>>;
-
-    fn next_boxed_node<T: TryFrom<Pair<'a, Rule>, Error = Error>>(
-        &mut self,
-    ) -> Result<Box<Context<T>>>;
-
-    fn next_string_node(&mut self) -> Result<Context<String>>;
-
-    fn next_str_into_node<T: FromStr<Err = Error>>(&mut self) -> Result<Context<T>>;
-}
-
-impl<'a> PairsExt<'a> for Pairs<'a, Rule> {
-    fn next_pair(&mut self) -> Result<Pair<'a, Rule>> {
-        if let Some(pair) = self.next() {
-            Ok(pair)
-        } else {
-            bail!("Expected next node")
-        }
-    }
-
-    fn collect_nodes<T: TryFrom<Pair<'a, Rule>, Error = Error>>(self) -> Result<Vec<Context<T>>> {
-        self.map(|pair| pair.try_into()).collect()
-    }
-
-    fn collect_string_nodes(self) -> Result<Vec<Context<String>>> {
-        self.map(|pair| pair.try_into_string_node()).collect()
-    }
-
-    fn next_node<T: TryFrom<Pair<'a, Rule>, Error = Error>>(&mut self) -> Result<Context<T>> {
-        let pair = self.next_pair()?;
-        pair.try_into()
-    }
-
-    fn next_boxed_node<T: TryFrom<Pair<'a, Rule>, Error = Error>>(
-        &mut self,
-    ) -> Result<Box<Context<T>>> {
-        let pair = self.next_pair()?;
-        Ok(Box::new(pair.try_into()?))
-    }
-
-    fn next_string_node(&mut self) -> Result<Context<String>> {
-        let pair = self.next_pair()?;
-        pair.try_into_string_node()
-    }
-
-    fn next_str_into_node<T: FromStr<Err = Error>>(&mut self) -> Result<Context<T>> {
-        let pair = self.next_pair()?;
-        pair.try_str_into_node()
-    }
-}
-
-impl<'a, T: TryFrom<Pair<'a, Rule>, Error = Error>> TryFrom<Pair<'a, Rule>> for Context<T> {
-    type Error = Error;
-
-    fn try_from(pair: Pair<'a, Rule>) -> Result<Self> {
-        let span = pair.as_span();
-        Ok(Self {
-            element: pair.try_into()?,
-            start: span.start_pos().into(),
-            end: span.end_pos().into(),
-        })
     }
 }

@@ -1,6 +1,6 @@
 use crate::{
     model::{
-        Access, AccessOperation, Apply, ArrayLiteral, Binary, BinaryOperator, Context, Expression,
+        Access, AccessOperation, Apply, ArrayLiteral, Binary, BinaryOperator, Ctx, Expression,
         MapEntry, MapLiteral, ObjectField, ObjectLiteral, PairLiteral, StringLiteral, StringPart,
         Ternary, Unary, UnaryOperator,
     },
@@ -163,7 +163,7 @@ impl<'a> TryFrom<TSNode<'a>> for Access {
                 let index_field = node.field(syntax::INDEX)?;
                 let (index_start, index_end) = index_field.span();
                 let index_operation = AccessOperation::Index(index_field.try_into()?);
-                let index = Context {
+                let index = Ctx {
                     element: index_operation,
                     start: index_start,
                     end: index_end,
@@ -178,7 +178,7 @@ impl<'a> TryFrom<TSNode<'a>> for Access {
                 let field_field = node.field(syntax::NAME)?;
                 let (field_start, field_end) = field_field.span();
                 let field_operation = AccessOperation::Field(field_field.try_as_string()?);
-                let field = Context {
+                let field = Ctx {
                     element: field_operation,
                     start: field_start,
                     end: field_end,

@@ -8,11 +8,11 @@ mod task;
 mod workflow;
 
 use crate::{
-    model::{Context, Document, DocumentSource, Location},
+    model::{Comments, Ctx, Document, DocumentSource, Location},
     parsers::WdlParser,
 };
 use anyhow::{anyhow, bail, ensure, Context as _, Error, Result};
-use std::str::FromStr;
+use std::{cell::RefCell, ops::Deref, rc::Rc, str::FromStr};
 use tree_sitter as ts;
 use tree_sitter_wdl_1::language as wdl1_language;
 
@@ -25,15 +25,16 @@ use tree_sitter_wdl_1::language as wdl1_language;
 pub struct TSNode<'a> {
     node: ts::Node<'a>,
     text: &'a [u8],
+    comments: Rc<RefCell<Comments>>,
 }
 
 impl<'a> TSNode<'a> {
-    fn new(node: ts::Node<'a>, text: &'a [u8]) -> Self {
-        Self { node, text }
-    }
-
-    pub fn kind(&self) -> &str {
-        self.node.kind()
+    fn new(node: ts::Node<'a>, text: &'a [u8], comments: Rc<RefCell<Comments>>) -> Self {
+        Self {
+            node,
+            text,
+            comments: comments.clone(),
+        }
     }
 
     pub fn span(&self) -> (Location, Location) {
@@ -67,12 +68,12 @@ impl<'a> TSNode<'a> {
         let cursor = &mut self.node.walk();
         self.node
             .named_children(cursor)
-            .map(|node| TSNode::new(node, self.text))
+            .map(|node| TSNode::new(node, self.text, self.comments.clone()))
             .map(|node| node.try_into())
             .collect()
     }
 
-    pub fn child_nodes<T: TryFrom<TSNode<'a>, Error = Error>>(&self) -> Result<Vec<Context<T>>> {
+    pub fn child_nodes<T: TryFrom<TSNode<'a>, Error = Error>>(&self) -> Result<Vec<Ctx<T>>> {
         self.children()
     }
 
@@ -80,6 +81,7 @@ impl<'a> TSNode<'a> {
         self.node.child_by_field_name(name).map(|node| TSNode {
             node,
             text: self.text,
+            comments: self.comments.clone(),
         })
     }
 
@@ -94,7 +96,7 @@ impl<'a> TSNode<'a> {
     pub fn field_node<T: TryFrom<TSNode<'a>, Error = Error>>(
         &mut self,
         name: &str,
-    ) -> Result<Context<T>> {
+    ) -> Result<Ctx<T>> {
         let field_node = self.field(name)?;
         field_node.try_into()
     }
@@ -102,7 +104,7 @@ impl<'a> TSNode<'a> {
     pub fn get_field_node<T: TryFrom<TSNode<'a>, Error = Error>>(
         &mut self,
         name: &str,
-    ) -> Result<Option<Context<T>>> {
+    ) -> Result<Option<Ctx<T>>> {
         let field_node = self.get_field(name);
         field_node.map(|node| node.try_into()).transpose()
     }
@@ -110,7 +112,7 @@ impl<'a> TSNode<'a> {
     pub fn field_boxed_node<T: TryFrom<TSNode<'a>, Error = Error>>(
         &mut self,
         name: &str,
-    ) -> Result<Box<Context<T>>> {
+    ) -> Result<Box<Ctx<T>>> {
         Ok(Box::new(self.field_node(name)?))
     }
 
@@ -119,7 +121,7 @@ impl<'a> TSNode<'a> {
         ts_node.try_as_str().map(|s| s.to_owned())
     }
 
-    pub fn field_string_node(&mut self, name: &str) -> Result<Context<String>> {
+    pub fn field_string_node(&mut self, name: &str) -> Result<Ctx<String>> {
         let ts_node = self.field(name)?;
         ts_node.try_into()
     }
@@ -127,12 +129,12 @@ impl<'a> TSNode<'a> {
     pub fn field_string_into_node<T: FromStr<Err = Error>>(
         &mut self,
         name: &str,
-    ) -> Result<Context<T>> {
+    ) -> Result<Ctx<T>> {
         let ts_node = self.field(name)?;
         let (start, end) = ts_node.span();
         let element_str = ts_node.try_as_str()?;
         let element = T::from_str(element_str)?;
-        Ok(Context {
+        Ok(Ctx {
             element,
             start,
             end,
@@ -142,7 +144,7 @@ impl<'a> TSNode<'a> {
     pub fn field_child_nodes<T: TryFrom<TSNode<'a>, Error = Error>>(
         &mut self,
         name: &str,
-    ) -> Result<Vec<Context<T>>> {
+    ) -> Result<Vec<Ctx<T>>> {
         let field_node = self.field(name)?;
         field_node.children()
     }
@@ -150,12 +152,20 @@ impl<'a> TSNode<'a> {
     pub fn get_field_child_nodes<T: TryFrom<TSNode<'a>, Error = Error>>(
         &mut self,
         name: &str,
-    ) -> Result<Vec<Context<T>>> {
+    ) -> Result<Vec<Ctx<T>>> {
         if let Some(field_node) = self.get_field(name) {
             field_node.children()
         } else {
             Ok(Vec::new())
         }
+    }
+}
+
+impl<'a> Deref for TSNode<'a> {
+    type Target = ts::Node<'a>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.node
     }
 }
 
@@ -176,7 +186,7 @@ impl<'a> TryFrom<TSNode<'a>> for String {
     }
 }
 
-impl<'a, T: TryFrom<TSNode<'a>, Error = Error>> TryFrom<TSNode<'a>> for Context<T> {
+impl<'a, T: TryFrom<TSNode<'a>, Error = Error>> TryFrom<TSNode<'a>> for Ctx<T> {
     type Error = Error;
 
     fn try_from(value: TSNode<'a>) -> Result<Self> {
@@ -217,6 +227,7 @@ impl WdlParser for TreeSitterParser {
         let root = TSNode {
             node: tree.root_node(),
             text: text.as_bytes(),
+            comments: Rc::new(RefCell::new(Comments::new())),
         };
         ensure!(
             root.kind() == syntax::DOCUMENT,

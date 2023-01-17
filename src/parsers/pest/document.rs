@@ -1,53 +1,53 @@
 use crate::{
     model::{Alias, Document, DocumentElement, DocumentSource, Import, Namespace, Struct, Version},
-    parsers::pest::{PairExt, PairsExt, Rule},
+    parsers::pest::{PestNode, Rule},
 };
 use anyhow::{bail, Error, Result};
-use pest::iterators::Pair;
 use std::convert::TryFrom;
 
-impl<'a> TryFrom<Pair<'a, Rule>> for Version {
+impl<'a> TryFrom<PestNode<'a>> for Version {
     type Error = Error;
 
-    fn try_from(pair: Pair<Rule>) -> Result<Self> {
+    fn try_from(node: PestNode<'a>) -> Result<Self> {
+        let inner = node.first_inner()?;
         Ok(Self {
-            identifier: pair.into_inner().next_str_into_node()?,
+            identifier: inner.try_str_into_ctx()?,
         })
     }
 }
 
-impl<'a> TryFrom<Pair<'a, Rule>> for Namespace {
+impl<'a> TryFrom<PestNode<'a>> for Namespace {
     type Error = Error;
 
-    fn try_from(pair: Pair<'a, Rule>) -> Result<Self> {
-        Ok(Self::Explicit(pair.try_into_string_node()?))
+    fn try_from(node: PestNode<'a>) -> Result<Self> {
+        Ok(Self::Explicit(node.try_into()?))
     }
 }
 
-impl<'a> TryFrom<Pair<'a, Rule>> for Alias {
+impl<'a> TryFrom<PestNode<'a>> for Alias {
     type Error = Error;
 
-    fn try_from(pair: Pair<'a, Rule>) -> Result<Self> {
-        let mut inner = pair.into_inner();
+    fn try_from(node: PestNode<'a>) -> Result<Self> {
+        let mut inner = node.into_inner();
         Ok(Self {
-            from: inner.next_string_node()?,
-            to: inner.next_string_node()?,
+            from: inner.next_string_ctx()?,
+            to: inner.next_string_ctx()?,
         })
     }
 }
 
-impl<'a> TryFrom<Pair<'a, Rule>> for Import {
+impl<'a> TryFrom<PestNode<'a>> for Import {
     type Error = Error;
 
-    fn try_from(pair: Pair<'a, Rule>) -> Result<Self> {
-        let mut inner = pair.into_inner();
-        let uri = inner.next_string_node()?;
-        let namespace = if let Some(Rule::namespace) = inner.peek().map(|node| node.as_rule()) {
-            Namespace::try_from(inner.next_pair()?)?
+    fn try_from(node: PestNode<'a>) -> Result<Self> {
+        let mut inner = node.into_inner();
+        let uri = inner.next_string_ctx()?;
+        let namespace = if let Some(Rule::namespace) = inner.peek_rule() {
+            Namespace::try_from(inner.next_node()?)?
         } else {
             Namespace::try_from_uri(&uri.element)?
         };
-        let aliases = inner.collect_nodes()?;
+        let aliases = inner.collect_ctxs()?;
         Ok(Self {
             uri,
             namespace,
@@ -56,42 +56,46 @@ impl<'a> TryFrom<Pair<'a, Rule>> for Import {
     }
 }
 
-impl<'a> TryFrom<Pair<'a, Rule>> for Struct {
+impl<'a> TryFrom<PestNode<'a>> for Struct {
     type Error = Error;
 
-    fn try_from(pair: Pair<'a, Rule>) -> Result<Self> {
-        let mut inner = pair.into_inner();
+    fn try_from(node: PestNode<'a>) -> Result<Self> {
+        let mut inner = node.into_inner();
         Ok(Self {
-            name: inner.next_string_node()?,
-            fields: inner.collect_nodes()?,
+            name: inner.next_string_ctx()?,
+            fields: inner.collect_ctxs()?,
         })
     }
 }
 
-impl<'a> TryFrom<Pair<'a, Rule>> for DocumentElement {
+impl<'a> TryFrom<PestNode<'a>> for DocumentElement {
     type Error = Error;
 
-    fn try_from(pair: Pair<Rule>) -> Result<Self> {
-        let e = match pair.as_rule() {
-            Rule::import => Self::Import(pair.try_into()?),
-            Rule::structdef => Self::Struct(pair.try_into()?),
-            Rule::task => Self::Task(pair.try_into()?),
-            Rule::workflow => Self::Workflow(pair.try_into()?),
-            _ => bail!("Invalid pair {}", pair),
+    fn try_from(node: PestNode<'a>) -> Result<Self> {
+        let e = match node.as_rule() {
+            Rule::import => Self::Import(node.try_into()?),
+            Rule::structdef => Self::Struct(node.try_into()?),
+            Rule::task => Self::Task(node.try_into()?),
+            Rule::workflow => Self::Workflow(node.try_into()?),
+            _ => bail!("Invalid node {:?}", node),
         };
         Ok(e)
     }
 }
 
-impl<'a> TryFrom<Pair<'a, Rule>> for Document {
+impl<'a> TryFrom<PestNode<'a>> for Document {
     type Error = Error;
 
-    fn try_from(pair: Pair<Rule>) -> Result<Self> {
-        let mut inner = pair.into_inner();
+    fn try_from(node: PestNode<'a>) -> Result<Self> {
+        let comments = node.comments.clone();
+        let mut inner = node.into_inner();
+        let version = inner.next_ctx()?;
+        let body = inner.collect_ctxs()?;
         let doc = Self {
             source: DocumentSource::default(),
-            version: inner.next_node()?,
-            body: inner.collect_nodes()?,
+            version,
+            body,
+            comments: comments.take(),
         };
         doc.validate()?;
         Ok(doc)

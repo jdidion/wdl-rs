@@ -3,138 +3,137 @@ use crate::{
         Float, Integer, Meta, MetaArray, MetaAttribute, MetaObject, MetaObjectField, MetaString,
         MetaStringPart, MetaValue,
     },
-    parsers::pest::{PairExt, PairsExt, Rule},
+    parsers::pest::{PestNode, Rule},
 };
 use anyhow::{bail, Error, Result};
-use pest::iterators::Pair;
 use std::convert::TryFrom;
 
-impl<'a> TryFrom<Pair<'a, Rule>> for MetaStringPart {
+impl<'a> TryFrom<PestNode<'a>> for MetaStringPart {
     type Error = Error;
 
-    fn try_from(pair: Pair<Rule>) -> Result<Self> {
-        let part = match pair.as_rule() {
+    fn try_from(node: PestNode<'a>) -> Result<Self> {
+        let part = match node.as_rule() {
             Rule::simple_squote_literal | Rule::simple_dquote_literal => {
-                Self::Content(pair.as_string())
+                Self::Content(node.as_string())
             }
             Rule::simple_squote_escape_sequence | Rule::simple_dquote_escape_sequence => {
-                Self::Escape(pair.as_string())
+                Self::Escape(node.as_string())
             }
-            _ => bail!("Invalid meta string part {:?}", pair),
+            _ => bail!("Invalid meta string part {:?}", node),
         };
         Ok(part)
     }
 }
 
-impl<'a> TryFrom<Pair<'a, Rule>> for MetaString {
+impl<'a> TryFrom<PestNode<'a>> for MetaString {
     type Error = Error;
 
-    fn try_from(pair: Pair<Rule>) -> Result<Self> {
+    fn try_from(node: PestNode<'a>) -> Result<Self> {
         Ok(Self {
-            parts: pair.into_inner().collect_nodes()?,
+            parts: node.into_inner().collect_ctxs()?,
         })
     }
 }
 
-impl<'a> TryFrom<Pair<'a, Rule>> for MetaArray {
+impl<'a> TryFrom<PestNode<'a>> for MetaArray {
     type Error = Error;
 
-    fn try_from(pair: Pair<Rule>) -> Result<Self> {
+    fn try_from(node: PestNode<'a>) -> Result<Self> {
         Ok(Self {
-            elements: pair.into_inner().collect_nodes()?,
+            elements: node.into_inner().collect_ctxs()?,
         })
     }
 }
 
-impl<'a> TryFrom<Pair<'a, Rule>> for MetaObjectField {
+impl<'a> TryFrom<PestNode<'a>> for MetaObjectField {
     type Error = Error;
 
-    fn try_from(pair: Pair<Rule>) -> Result<Self> {
-        let mut inner = pair.into_inner();
+    fn try_from(node: PestNode<'a>) -> Result<Self> {
+        let mut inner = node.into_inner();
         Ok(Self {
-            name: inner.next_string_node()?,
-            value: inner.next_node()?,
+            name: inner.next_string_ctx()?,
+            value: inner.next_ctx()?,
         })
     }
 }
 
-impl<'a> TryFrom<Pair<'a, Rule>> for MetaObject {
+impl<'a> TryFrom<PestNode<'a>> for MetaObject {
     type Error = Error;
 
-    fn try_from(pair: Pair<Rule>) -> Result<Self> {
+    fn try_from(node: PestNode<'a>) -> Result<Self> {
         Ok(Self {
-            fields: pair.into_inner().collect_nodes()?,
+            fields: node.into_inner().collect_ctxs()?,
         })
     }
 }
 
-fn pest_meta_number(pair: Pair<Rule>, negate: bool) -> Result<MetaValue> {
-    let n = match pair.as_rule() {
+fn pest_meta_number<'a>(node: PestNode<'a>, negate: bool) -> Result<MetaValue> {
+    let n = match node.as_rule() {
         Rule::int => {
-            let mut i: Integer = pair.try_into()?;
+            let mut i: Integer = node.try_into()?;
             if negate {
                 i.negate()?;
             }
             MetaValue::Int(i)
         }
         Rule::float => {
-            let mut f: Float = pair.try_into()?;
+            let mut f: Float = node.try_into()?;
             if negate {
                 f.negate()?;
             }
             MetaValue::Float(f)
         }
-        _ => bail!("Invalid number {:?}", pair),
+        _ => bail!("Invalid number {:?}", node),
     };
     Ok(n)
 }
 
-impl<'a> TryFrom<Pair<'a, Rule>> for MetaValue {
+impl<'a> TryFrom<PestNode<'a>> for MetaValue {
     type Error = Error;
 
-    fn try_from(pair: Pair<Rule>) -> Result<Self> {
-        let value = match pair.as_rule() {
+    fn try_from(node: PestNode<'a>) -> Result<Self> {
+        let value = match node.as_rule() {
             Rule::null => Self::Null,
             Rule::true_literal => Self::Boolean(true),
             Rule::false_literal => Self::Boolean(false),
             Rule::meta_number => {
-                let mut inner = pair.into_inner();
-                let first_pair = inner.next_pair()?;
-                let first_rule = first_pair.as_rule();
+                let mut inner = node.into_inner();
+                let first_node = inner.next_node()?;
+                let first_rule = first_node.as_rule();
                 match first_rule {
                     Rule::pos | Rule::neg => {
-                        pest_meta_number(inner.next_pair()?, first_rule == Rule::neg)?
+                        pest_meta_number(inner.next_node()?, first_rule == Rule::neg)?
                     }
-                    _ => pest_meta_number(first_pair, false)?,
+                    _ => pest_meta_number(first_node, false)?,
                 }
             }
-            Rule::simple_string => Self::String(pair.try_into()?),
-            Rule::meta_array => Self::Array(pair.try_into()?),
-            Rule::meta_object => Self::Object(pair.try_into()?),
-            _ => bail!("Ivalid meta value {:?}", pair),
+            Rule::simple_string => Self::String(node.try_into()?),
+            Rule::meta_array => Self::Array(node.try_into()?),
+            Rule::meta_object => Self::Object(node.try_into()?),
+            _ => bail!("Ivalid meta value {:?}", node),
         };
         Ok(value)
     }
 }
 
-impl<'a> TryFrom<Pair<'a, Rule>> for MetaAttribute {
+impl<'a> TryFrom<PestNode<'a>> for MetaAttribute {
     type Error = Error;
 
-    fn try_from(pair: Pair<Rule>) -> Result<Self> {
-        let mut inner = pair.into_inner();
+    fn try_from(node: PestNode<'a>) -> Result<Self> {
+        let mut inner = node.into_inner();
         Ok(Self {
-            name: inner.next_string_node()?,
-            value: inner.next_node()?,
+            name: inner.next_string_ctx()?,
+            value: inner.next_ctx()?,
         })
     }
 }
 
-impl<'a> TryFrom<Pair<'a, Rule>> for Meta {
+impl<'a> TryFrom<PestNode<'a>> for Meta {
     type Error = Error;
 
-    fn try_from(pair: Pair<Rule>) -> Result<Self> {
+    fn try_from(node: PestNode<'a>) -> Result<Self> {
         Ok(Self {
-            attributes: pair.into_inner().collect_nodes()?,
+            attributes: node.into_inner().collect_ctxs()?,
         })
     }
 }
