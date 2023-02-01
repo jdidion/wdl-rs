@@ -1,47 +1,47 @@
 use crate::{
-    model::{Command, Runtime, RuntimeAttribute, Task, TaskElement},
-    parsers::pest::{PestNode, Rule},
+    model::{Command, ModelError, Runtime, RuntimeAttribute, Task, TaskElement},
+    parsers::pest::{node::PestNode, Rule},
 };
-use anyhow::{bail, Error, Result};
+use error_stack::{bail, Report, Result};
 use std::convert::TryFrom;
 
 impl<'a> TryFrom<PestNode<'a>> for Command {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: PestNode<'a>) -> Result<Self> {
-        let command_body = node.first_inner()?;
+    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
+        let command_body = node.one_inner()?;
         Ok(Self {
-            parts: command_body.into_inner().collect_ctxs()?,
+            parts: command_body.into_inner().collect_anchors()?,
         })
     }
 }
 
 impl<'a> TryFrom<PestNode<'a>> for RuntimeAttribute {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: PestNode<'a>) -> Result<Self> {
+    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         let mut inner = node.into_inner();
         Ok(Self {
-            name: inner.next_string_ctx()?,
-            expression: inner.next_ctx()?,
+            name: inner.next_node().try_into()?,
+            expression: inner.next_node().try_into()?,
         })
     }
 }
 
 impl<'a> TryFrom<PestNode<'a>> for Runtime {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: PestNode<'a>) -> Result<Self> {
+    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         Ok(Self {
-            attributes: node.into_inner().collect_ctxs()?,
+            attributes: node.into_inner().collect_anchors()?,
         })
     }
 }
 
 impl<'a> TryFrom<PestNode<'a>> for TaskElement {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: PestNode<'a>) -> Result<Self> {
+    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         let e = match node.as_rule() {
             Rule::input => Self::Input(node.try_into()?),
             Rule::output => Self::Output(node.try_into()?),
@@ -49,20 +49,23 @@ impl<'a> TryFrom<PestNode<'a>> for TaskElement {
             Rule::parameter_meta => Self::ParameterMeta(node.try_into()?),
             Rule::command => Self::Command(node.try_into()?),
             Rule::runtime => Self::Runtime(node.try_into()?),
-            _ => bail!("Invalid task element {:?}", node),
+            _ => bail!(ModelError::parser(format!(
+                "Invalid task element {:?}",
+                node
+            ))),
         };
         Ok(e)
     }
 }
 
 impl<'a> TryFrom<PestNode<'a>> for Task {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: PestNode<'a>) -> Result<Self> {
+    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         let mut inner = node.into_inner();
         Ok(Self {
-            name: inner.next_string_ctx()?,
-            body: inner.collect_ctxs()?,
+            name: inner.next_node().try_into()?,
+            body: inner.collect_anchors()?,
         })
     }
 }

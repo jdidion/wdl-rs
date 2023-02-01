@@ -1,29 +1,29 @@
 use crate::{
     model::{
-        Call, CallInput, Conditional, QualifiedName, Scatter, Workflow, WorkflowBodyElement,
-        WorkflowElement,
+        Call, CallInput, Conditional, ModelError, QualifiedName, Scatter, Workflow,
+        WorkflowBodyElement, WorkflowElement,
     },
-    parsers::pest::{PestNode, Rule},
+    parsers::pest::{node::PestNode, Rule},
 };
-use anyhow::{bail, Error, Result};
+use error_stack::{bail, Report, Result};
 use std::convert::TryFrom;
 
 impl<'a> TryFrom<PestNode<'a>> for QualifiedName {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: PestNode<'a>) -> Result<Self> {
+    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         Ok(Self {
-            parts: node.into_inner().collect_string_ctxs()?,
+            parts: node.into_inner().collect_string_anchors()?,
         })
     }
 }
 
 impl<'a> TryFrom<PestNode<'a>> for CallInput {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: PestNode<'a>) -> Result<Self> {
+    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         let mut inner = node.into_inner();
-        let name = inner.next_string_ctx()?;
+        let name = inner.next_node().try_into()?;
         let expression = inner
             .next()
             .map(|expr_node| expr_node.try_into())
@@ -33,19 +33,19 @@ impl<'a> TryFrom<PestNode<'a>> for CallInput {
 }
 
 impl<'a> TryFrom<PestNode<'a>> for Call {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: PestNode<'a>) -> Result<Self> {
+    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         let mut inner = node.into_inner();
-        let target = inner.next_ctx()?;
+        let target = inner.next_node().try_into()?;
         let alias = if let Some(Rule::call_alias) = inner.peek_rule() {
             let alias_node = inner.next_node()?;
-            Some(alias_node.first_inner_string_ctx()?)
+            Some(alias_node.one_inner().try_into()?)
         } else {
             None
         };
-        let inputs = if let Some(inputs_node) = inner.next() {
-            inputs_node.into_inner().collect_ctxs()?
+        let inputs = if let Some(inputs_node) = inner.next().transpose()? {
+            inputs_node.into_inner().collect_anchors()?
         } else {
             Vec::new()
         };
@@ -58,48 +58,51 @@ impl<'a> TryFrom<PestNode<'a>> for Call {
 }
 
 impl<'a> TryFrom<PestNode<'a>> for Scatter {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: PestNode<'a>) -> Result<Self> {
+    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         let mut inner = node.into_inner();
         Ok(Self {
-            name: inner.next_string_ctx()?,
-            expression: inner.next_ctx()?,
-            body: inner.collect_ctxs()?,
+            name: inner.next_node().try_into()?,
+            expression: inner.next_node().try_into()?,
+            body: inner.collect_anchors()?,
         })
     }
 }
 
 impl<'a> TryFrom<PestNode<'a>> for Conditional {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: PestNode<'a>) -> Result<Self> {
+    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         let mut inner = node.into_inner();
         Ok(Self {
-            expression: inner.next_ctx()?,
-            body: inner.collect_ctxs()?,
+            expression: inner.next_node().try_into()?,
+            body: inner.collect_anchors()?,
         })
     }
 }
 
 impl<'a> TryFrom<PestNode<'a>> for WorkflowBodyElement {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: PestNode<'a>) -> Result<Self> {
+    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         let e = match node.as_rule() {
             Rule::call => Self::Call(node.try_into()?),
             Rule::scatter => Self::Scatter(node.try_into()?),
             Rule::conditional => Self::Conditional(node.try_into()?),
-            _ => bail!("Invalid task element {:?}", node),
+            _ => bail!(ModelError::parser(format!(
+                "Invalid task element {:?}",
+                node
+            ))),
         };
         Ok(e)
     }
 }
 
 impl<'a> TryFrom<PestNode<'a>> for WorkflowElement {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: PestNode<'a>) -> Result<Self> {
+    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         let e = match node.as_rule() {
             Rule::input => Self::Input(node.try_into()?),
             Rule::output => Self::Output(node.try_into()?),
@@ -108,20 +111,23 @@ impl<'a> TryFrom<PestNode<'a>> for WorkflowElement {
             Rule::call => Self::Call(node.try_into()?),
             Rule::scatter => Self::Scatter(node.try_into()?),
             Rule::conditional => Self::Conditional(node.try_into()?),
-            _ => bail!("Invalid task element {:?}", node),
+            _ => bail!(ModelError::parser(format!(
+                "Invalid task element {:?}",
+                node
+            ))),
         };
         Ok(e)
     }
 }
 
 impl<'a> TryFrom<PestNode<'a>> for Workflow {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: PestNode<'a>) -> Result<Self> {
+    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         let mut inner = node.into_inner();
         Ok(Self {
-            name: inner.next_string_ctx()?,
-            body: inner.collect_ctxs()?,
+            name: inner.next_node().try_into()?,
+            body: inner.collect_anchors()?,
         })
     }
 }

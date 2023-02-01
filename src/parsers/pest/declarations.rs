@@ -1,17 +1,21 @@
 use crate::{
-    model::{BoundDeclaration, Input, InputDeclaration, Output, Type, UnboundDeclaration},
-    parsers::pest::{PestNode, Rule},
+    model::{
+        BoundDeclaration, Input, InputDeclaration, ModelError, Output, Type, UnboundDeclaration,
+    },
+    parsers::pest::{node::PestNode, Rule},
 };
-use anyhow::{bail, Error, Ok, Result};
+use error_stack::{bail, Report, Result};
 use std::convert::TryFrom;
 
-impl<'a> TryFrom<PestNode<'a>> for Type {
-    type Error = Error;
+use super::node::PestNodeResultExt;
 
-    fn try_from(node: PestNode<'a>) -> Result<Self> {
-        let type_node = node.first_inner()?;
+impl<'a> TryFrom<PestNode<'a>> for Type {
+    type Error = Report<ModelError>;
+
+    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
+        let type_node = node.one_inner()?;
         let t = match type_node.as_rule() {
-            Rule::optional_type => Self::Optional(type_node.first_inner_boxed_ctx()?),
+            Rule::optional_type => Self::Optional(type_node.one_inner().into_boxed_anchor()?),
             Rule::primitive_type => match type_node.as_str() {
                 "Boolean" => Self::Boolean,
                 "Int" => Self::Int,
@@ -19,83 +23,88 @@ impl<'a> TryFrom<PestNode<'a>> for Type {
                 "String" => Self::String,
                 "File" => Self::File,
                 "Object" => Self::Object,
-                _ => bail!("Invalid primitive type {:?}", type_node),
+                _ => bail!(ModelError::parser(format!(
+                    "Invalid primitive type {:?}",
+                    type_node
+                ))),
             },
-            Rule::non_empty_array_type => Self::NonEmpty(type_node.first_inner_boxed_ctx()?),
-            Rule::maybe_empty_array_type => Self::Array(type_node.first_inner_boxed_ctx()?),
+            Rule::non_empty_array_type => {
+                Self::NonEmpty(type_node.one_inner().into_boxed_anchor()?)
+            }
+            Rule::maybe_empty_array_type => Self::Array(type_node.one_inner().into_boxed_anchor()?),
             Rule::map_type => {
                 let mut inner = type_node.into_inner();
-                let key = inner.next_boxed_ctx()?;
-                let value = inner.next_boxed_ctx()?;
+                let key = inner.next_node().into_boxed_anchor()?;
+                let value = inner.next_node().into_boxed_anchor()?;
                 Self::Map { key, value }
             }
             Rule::pair_type => {
                 let mut inner = type_node.into_inner();
-                let left = inner.next_boxed_ctx()?;
-                let right = inner.next_boxed_ctx()?;
+                let left = inner.next_node().into_boxed_anchor()?;
+                let right = inner.next_node().into_boxed_anchor()?;
                 Self::Pair { left, right }
             }
-            Rule::user_type => Self::User(type_node.first_inner_string()?),
-            _ => bail!("Invalid typedef {:?}", type_node),
+            Rule::user_type => Self::User(type_node.one_inner().into_string()?),
+            _ => return type_node.into_err(|node| format!("Invalid typedef {:?}", node)),
         };
         Ok(t)
     }
 }
 
 impl<'a> TryFrom<PestNode<'a>> for UnboundDeclaration {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: PestNode<'a>) -> Result<Self> {
+    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         let mut inner = node.into_inner();
         Ok(Self {
-            wdl_type: inner.next_ctx()?,
-            name: inner.next_string_ctx()?,
+            wdl_type: inner.next_node().try_into()?,
+            name: inner.next_node().try_into()?,
         })
     }
 }
 
 impl<'a> TryFrom<PestNode<'a>> for BoundDeclaration {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: PestNode<'a>) -> Result<Self> {
+    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         let mut inner = node.into_inner();
         Ok(Self {
-            wdl_type: inner.next_ctx()?,
-            name: inner.next_string_ctx()?,
-            expression: inner.next_ctx()?,
+            wdl_type: inner.next_node().try_into()?,
+            name: inner.next_node().try_into()?,
+            expression: inner.next_node().try_into()?,
         })
     }
 }
 
 impl<'a> TryFrom<PestNode<'a>> for InputDeclaration {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: PestNode<'a>) -> Result<Self> {
+    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         let decl = match node.as_rule() {
             Rule::unbound_declaration => Self::Unbound(node.try_into()?),
             Rule::bound_declaration => Self::Bound(node.try_into()?),
-            _ => bail!("Invalid declaration {:?}", node),
+            _ => return node.into_err(|node| format!("Invalid declaration {:?}", node)),
         };
         Ok(decl)
     }
 }
 
 impl<'a> TryFrom<PestNode<'a>> for Input {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: PestNode<'a>) -> Result<Self> {
+    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         Ok(Input {
-            declarations: node.into_inner().collect_ctxs()?,
+            declarations: node.into_inner().collect_anchors()?,
         })
     }
 }
 
 impl<'a> TryFrom<PestNode<'a>> for Output {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: PestNode<'a>) -> Result<Self> {
+    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         Ok(Output {
-            declarations: node.into_inner().collect_ctxs()?,
+            declarations: node.into_inner().collect_anchors()?,
         })
     }
 }

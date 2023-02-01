@@ -1,97 +1,100 @@
 use crate::{
     model::{
         Float, Integer, Meta, MetaArray, MetaAttribute, MetaObject, MetaObjectField, MetaString,
-        MetaStringPart, MetaValue,
+        MetaStringPart, MetaValue, ModelError,
     },
-    parsers::pest::{PestNode, Rule},
+    parsers::pest::{node::PestNode, Rule},
 };
-use anyhow::{bail, Error, Result};
+use error_stack::{bail, Report, Result};
 use std::convert::TryFrom;
 
 impl<'a> TryFrom<PestNode<'a>> for MetaStringPart {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: PestNode<'a>) -> Result<Self> {
+    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         let part = match node.as_rule() {
             Rule::simple_squote_literal | Rule::simple_dquote_literal => {
-                Self::Content(node.as_string())
+                Self::Content(node.try_into()?)
             }
             Rule::simple_squote_escape_sequence | Rule::simple_dquote_escape_sequence => {
-                Self::Escape(node.as_string())
+                Self::Escape(node.try_into()?)
             }
-            _ => bail!("Invalid meta string part {:?}", node),
+            _ => bail!(ModelError::parser(format!(
+                "Invalid meta string part {:?}",
+                node
+            ))),
         };
         Ok(part)
     }
 }
 
 impl<'a> TryFrom<PestNode<'a>> for MetaString {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: PestNode<'a>) -> Result<Self> {
+    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         Ok(Self {
-            parts: node.into_inner().collect_ctxs()?,
+            parts: node.into_inner().collect_anchors()?,
         })
     }
 }
 
 impl<'a> TryFrom<PestNode<'a>> for MetaArray {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: PestNode<'a>) -> Result<Self> {
+    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         Ok(Self {
-            elements: node.into_inner().collect_ctxs()?,
+            elements: node.into_inner().collect_anchors()?,
         })
     }
 }
 
 impl<'a> TryFrom<PestNode<'a>> for MetaObjectField {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: PestNode<'a>) -> Result<Self> {
+    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         let mut inner = node.into_inner();
         Ok(Self {
-            name: inner.next_string_ctx()?,
-            value: inner.next_ctx()?,
+            name: inner.next_node().try_into()?,
+            value: inner.next_node().try_into()?,
         })
     }
 }
 
 impl<'a> TryFrom<PestNode<'a>> for MetaObject {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: PestNode<'a>) -> Result<Self> {
+    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         Ok(Self {
-            fields: node.into_inner().collect_ctxs()?,
+            fields: node.into_inner().collect_anchors()?,
         })
     }
 }
 
-fn pest_meta_number<'a>(node: PestNode<'a>, negate: bool) -> Result<MetaValue> {
+fn pest_meta_number<'a>(node: PestNode<'a>, negate: bool) -> Result<MetaValue, ModelError> {
     let n = match node.as_rule() {
         Rule::int => {
             let mut i: Integer = node.try_into()?;
             if negate {
-                i.negate()?;
+                i = i.negate();
             }
             MetaValue::Int(i)
         }
         Rule::float => {
             let mut f: Float = node.try_into()?;
             if negate {
-                f.negate()?;
+                f = f.negate();
             }
             MetaValue::Float(f)
         }
-        _ => bail!("Invalid number {:?}", node),
+        _ => bail!(ModelError::parser(format!("Invalid number {:?}", node))),
     };
     Ok(n)
 }
 
 impl<'a> TryFrom<PestNode<'a>> for MetaValue {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: PestNode<'a>) -> Result<Self> {
+    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         let value = match node.as_rule() {
             Rule::null => Self::Null,
             Rule::true_literal => Self::Boolean(true),
@@ -110,30 +113,30 @@ impl<'a> TryFrom<PestNode<'a>> for MetaValue {
             Rule::simple_string => Self::String(node.try_into()?),
             Rule::meta_array => Self::Array(node.try_into()?),
             Rule::meta_object => Self::Object(node.try_into()?),
-            _ => bail!("Ivalid meta value {:?}", node),
+            _ => bail!(ModelError::parser(format!("Invalid meta value {:?}", node))),
         };
         Ok(value)
     }
 }
 
 impl<'a> TryFrom<PestNode<'a>> for MetaAttribute {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: PestNode<'a>) -> Result<Self> {
+    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         let mut inner = node.into_inner();
         Ok(Self {
-            name: inner.next_string_ctx()?,
-            value: inner.next_ctx()?,
+            name: inner.next_node().try_into()?,
+            value: inner.next_node().try_into()?,
         })
     }
 }
 
 impl<'a> TryFrom<PestNode<'a>> for Meta {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: PestNode<'a>) -> Result<Self> {
+    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         Ok(Self {
-            attributes: node.into_inner().collect_ctxs()?,
+            attributes: node.into_inner().collect_anchors()?,
         })
     }
 }

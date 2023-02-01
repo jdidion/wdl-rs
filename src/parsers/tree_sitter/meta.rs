@@ -1,71 +1,84 @@
 use crate::{
     model::{
         Meta, MetaArray, MetaAttribute, MetaObject, MetaObjectField, MetaString, MetaStringPart,
-        MetaValue,
+        MetaValue, ModelError,
     },
-    parsers::tree_sitter::{syntax, TSNode},
+    parsers::tree_sitter::{
+        node::{TSNode, TSNodeIteratorResultExt, TSNodeResultExt},
+        syntax,
+    },
 };
-use anyhow::{bail, Error, Result};
+use error_stack::{bail, Report, Result};
 use std::convert::TryFrom;
 
 impl<'a> TryFrom<TSNode<'a>> for MetaStringPart {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: TSNode<'a>) -> Result<Self> {
+    fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         let part = match node.kind() {
-            syntax::CONTENT => Self::Content(node.try_as_string()?),
-            syntax::ESCAPE_SEQUENCE => Self::Escape(node.try_as_string()?),
-            _ => bail!("Invalid string part {:?}", node),
+            syntax::CONTENT => Self::Content(node.try_into()?),
+            syntax::ESCAPE_SEQUENCE => Self::Escape(node.try_into()?),
+            _ => bail!(ModelError::parser(format!(
+                "Invalid string part {:?}",
+                node
+            ))),
         };
         Ok(part)
     }
 }
 
 impl<'a> TryFrom<TSNode<'a>> for MetaString {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: TSNode<'a>) -> Result<Self> {
+    fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         Ok(Self {
-            parts: node.child_nodes()?,
+            parts: node.into_children().collect_anchors()?,
         })
     }
 }
 
 impl<'a> TryFrom<TSNode<'a>> for MetaArray {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(mut node: TSNode<'a>) -> Result<Self> {
+    fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         Ok(Self {
-            elements: node.get_field_child_nodes(syntax::ELEMENTS)?,
+            elements: node
+                .try_into_child_field(syntax::ELEMENTS)
+                .into_children()
+                .collect_anchors()?,
         })
     }
 }
 
 impl<'a> TryFrom<TSNode<'a>> for MetaObjectField {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(mut node: TSNode<'a>) -> Result<Self> {
+    fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
+        let mut children = node.into_children();
         Ok(Self {
-            name: node.field_node(syntax::NAME)?,
-            value: node.field_node(syntax::VALUE)?,
+            name: children.next_field(syntax::NAME).try_into()?,
+            value: children.next_field(syntax::VALUE).try_into()?,
         })
     }
 }
 
 impl<'a> TryFrom<TSNode<'a>> for MetaObject {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(mut node: TSNode<'a>) -> Result<Self> {
+    fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         Ok(Self {
-            fields: node.field_child_nodes(syntax::FIELDS)?,
+            fields: node
+                .try_into_child_field(syntax::FIELDS)
+                .into_children()
+                .collect_anchors()?,
         })
     }
 }
 
 impl<'a> TryFrom<TSNode<'a>> for MetaValue {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: TSNode<'a>) -> Result<Self> {
+    fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         let value = match node.kind() {
             syntax::NULL => Self::Null,
             syntax::TRUE => Self::Boolean(true),
@@ -75,29 +88,33 @@ impl<'a> TryFrom<TSNode<'a>> for MetaValue {
             syntax::SIMPLE_STRING => Self::String(node.try_into()?),
             syntax::META_ARRAY => Self::Array(node.try_into()?),
             syntax::META_OBJECT => Self::Object(node.try_into()?),
-            _ => bail!("Invalid meta value {:?}", node),
+            _ => bail!(ModelError::parser(format!("Invalid meta value {:?}", node))),
         };
         Ok(value)
     }
 }
 
 impl<'a> TryFrom<TSNode<'a>> for MetaAttribute {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(mut node: TSNode<'a>) -> Result<Self> {
+    fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
+        let mut children = node.into_children();
         Ok(Self {
-            name: node.field_node(syntax::NAME)?,
-            value: node.field_node(syntax::VALUE)?,
+            name: children.next_field(syntax::NAME).try_into()?,
+            value: children.next_field(syntax::VALUE).try_into()?,
         })
     }
 }
 
 impl<'a> TryFrom<TSNode<'a>> for Meta {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(mut node: TSNode<'a>) -> Result<Self> {
+    fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         Ok(Self {
-            attributes: node.field_child_nodes(syntax::ATTRIBUTES)?,
+            attributes: node
+                .try_into_child_field(syntax::ATTRIBUTES)
+                .into_children()
+                .collect_anchors()?,
         })
     }
 }

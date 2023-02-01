@@ -1,23 +1,22 @@
 use crate::{
-    model::{Float, Integer},
-    parsers::pest::PestNode,
+    model::{Float, Integer, ModelError},
+    parsers::pest::node::{PestNode, PestNodeResultExt},
 };
-use anyhow::{Error, Result};
+use error_stack::{Report, Result};
 use std::str::FromStr;
 
 impl<'a> TryFrom<PestNode<'a>> for Integer {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: PestNode<'a>) -> Result<Self> {
-        let inner = node.first_inner()?;
-        Self::from_str(inner.as_str())
+    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
+        Self::from_str(node.one_inner().into_str()?)
     }
 }
 
 impl<'a> TryFrom<PestNode<'a>> for Float {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: PestNode<'a>) -> Result<Self> {
+    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         Self::from_str(node.as_str())
     }
 }

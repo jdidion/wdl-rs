@@ -1,53 +1,58 @@
 use crate::{
-    model::{Alias, Document, DocumentElement, DocumentSource, Import, Namespace, Struct, Version},
-    parsers::pest::{PestNode, Rule},
+    model::{
+        Alias, Anchor, Document, DocumentElement, DocumentSource, Import, ModelError, Namespace,
+        Struct, Version,
+    },
+    parsers::pest::{
+        node::{PestNode, PestNodeResultExt},
+        Rule,
+    },
 };
-use anyhow::{bail, Error, Result};
+use error_stack::{bail, Report, Result};
 use std::convert::TryFrom;
 
 impl<'a> TryFrom<PestNode<'a>> for Version {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: PestNode<'a>) -> Result<Self> {
-        let inner = node.first_inner()?;
+    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         Ok(Self {
-            identifier: inner.try_str_into_ctx()?,
+            identifier: node.one_inner().into_anchor_from_str()?,
         })
     }
 }
 
 impl<'a> TryFrom<PestNode<'a>> for Namespace {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: PestNode<'a>) -> Result<Self> {
+    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         Ok(Self::Explicit(node.try_into()?))
     }
 }
 
 impl<'a> TryFrom<PestNode<'a>> for Alias {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: PestNode<'a>) -> Result<Self> {
+    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         let mut inner = node.into_inner();
         Ok(Self {
-            from: inner.next_string_ctx()?,
-            to: inner.next_string_ctx()?,
+            from: inner.next_node().try_into()?,
+            to: inner.next_node().try_into()?,
         })
     }
 }
 
 impl<'a> TryFrom<PestNode<'a>> for Import {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: PestNode<'a>) -> Result<Self> {
+    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         let mut inner = node.into_inner();
-        let uri = inner.next_string_ctx()?;
+        let uri: Anchor<String> = inner.next_node().try_into()?;
         let namespace = if let Some(Rule::namespace) = inner.peek_rule() {
             Namespace::try_from(inner.next_node()?)?
         } else {
-            Namespace::try_from_uri(&uri.element)?
+            Namespace::from_uri(&uri.element)
         };
-        let aliases = inner.collect_ctxs()?;
+        let aliases = inner.collect_anchors()?;
         Ok(Self {
             uri,
             namespace,
@@ -57,47 +62,48 @@ impl<'a> TryFrom<PestNode<'a>> for Import {
 }
 
 impl<'a> TryFrom<PestNode<'a>> for Struct {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: PestNode<'a>) -> Result<Self> {
+    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         let mut inner = node.into_inner();
         Ok(Self {
-            name: inner.next_string_ctx()?,
-            fields: inner.collect_ctxs()?,
+            name: inner.next_node().try_into()?,
+            fields: inner.collect_anchors()?,
         })
     }
 }
 
 impl<'a> TryFrom<PestNode<'a>> for DocumentElement {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: PestNode<'a>) -> Result<Self> {
+    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         let e = match node.as_rule() {
             Rule::import => Self::Import(node.try_into()?),
             Rule::structdef => Self::Struct(node.try_into()?),
             Rule::task => Self::Task(node.try_into()?),
             Rule::workflow => Self::Workflow(node.try_into()?),
-            _ => bail!("Invalid node {:?}", node),
+            _ => bail!(ModelError::parser(format!(
+                "Invalid document element {:?}",
+                node
+            ))),
         };
         Ok(e)
     }
 }
 
 impl<'a> TryFrom<PestNode<'a>> for Document {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: PestNode<'a>) -> Result<Self> {
-        let comments = node.comments.clone();
+    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
+        let comments = node.clone_comments();
         let mut inner = node.into_inner();
-        let version = inner.next_ctx()?;
-        let body = inner.collect_ctxs()?;
-        let doc = Self {
+        let version = inner.next_node().try_into()?;
+        let body = inner.collect_anchors()?;
+        Ok(Self {
             source: DocumentSource::default(),
             version,
             body,
             comments: comments.take(),
-        };
-        doc.validate()?;
-        Ok(doc)
+        })
     }
 }

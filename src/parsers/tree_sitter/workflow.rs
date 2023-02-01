@@ -1,87 +1,117 @@
 use crate::{
     model::{
-        Call, CallInput, Conditional, QualifiedName, Scatter, Workflow, WorkflowBodyElement,
-        WorkflowElement,
+        Call, CallInput, Conditional, ModelError, QualifiedName, Scatter, Workflow,
+        WorkflowBodyElement, WorkflowElement,
     },
-    parsers::tree_sitter::{syntax, TSNode},
+    parsers::tree_sitter::{
+        node::{TSNode, TSNodeIteratorResultExt, TSNodeResultExt},
+        syntax,
+    },
 };
-use anyhow::{bail, Error, Result};
+use error_stack::{bail, Report, Result};
 use std::convert::TryFrom;
 
 impl<'a> TryFrom<TSNode<'a>> for QualifiedName {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: TSNode<'a>) -> Result<Self> {
+    fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         Ok(Self {
-            parts: node.child_nodes()?,
+            parts: node.into_children().collect_anchors()?,
         })
     }
 }
 
 impl<'a> TryFrom<TSNode<'a>> for CallInput {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(mut node: TSNode<'a>) -> Result<Self> {
-        Ok(Self {
-            name: node.field_string_node(syntax::NAME)?,
-            expression: node.get_field_node(syntax::EXPRESSION)?,
-        })
+    fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
+        let mut children = node.into_children();
+        let name = children.next_field(syntax::NAME).try_into()?;
+        let expression = children.next().transpose().and_then(|opt| {
+            if let Some(node) = opt {
+                node.ensure_field(syntax::EXPRESSION)?;
+                Ok(Some(node.try_into()?))
+            } else {
+                Ok(None)
+            }
+        })?;
+        Ok(Self { name, expression })
     }
 }
 
 impl<'a> TryFrom<TSNode<'a>> for Call {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(mut node: TSNode<'a>) -> Result<Self> {
+    fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
+        let mut children = node.into_children();
+        let target = children.next_field(syntax::TARGET).try_into()?;
+        let next = children.next_node()?;
+        let (alias, next) = match next.try_field()? {
+            syntax::ALIAS => (Some(next.try_into()?), children.next_field(syntax::INPUTS)?),
+            syntax::INPUTS => (None, next),
+            other => bail!(ModelError::parser(format!("Invalid call field {}", other))),
+        };
+        let inputs = next.into_children().collect_anchors()?;
         Ok(Self {
-            target: node.field_node(syntax::TARGET)?,
-            alias: node.get_field_node(syntax::ALIAS)?,
-            inputs: node.get_field_child_nodes(syntax::INPUTS)?,
+            target,
+            alias,
+            inputs,
         })
     }
 }
 
 impl<'a> TryFrom<TSNode<'a>> for Scatter {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(mut node: TSNode<'a>) -> Result<Self> {
+    fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
+        let mut children = node.into_children();
         Ok(Self {
-            name: node.field_string_node(syntax::NAME)?,
-            expression: node.field_node(syntax::EXPRESSION)?,
-            body: node.field_child_nodes(syntax::BODY)?,
+            name: children.next_field(syntax::NAME).try_into()?,
+            expression: children.next_field(syntax::EXPRESSION).try_into()?,
+            body: children
+                .next_field(syntax::BODY)
+                .into_children()
+                .collect_anchors()?,
         })
     }
 }
 
 impl<'a> TryFrom<TSNode<'a>> for Conditional {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(mut node: TSNode<'a>) -> Result<Self> {
+    fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
+        let mut children = node.into_children();
         Ok(Self {
-            expression: node.field_node(syntax::EXPRESSION)?,
-            body: node.field_child_nodes(syntax::BODY)?,
+            expression: children.next_field(syntax::EXPRESSION).try_into()?,
+            body: children
+                .next_field(syntax::BODY)
+                .into_children()
+                .collect_anchors()?,
         })
     }
 }
 
 impl<'a> TryFrom<TSNode<'a>> for WorkflowBodyElement {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: TSNode<'a>) -> Result<Self> {
+    fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         let element = match node.kind() {
             syntax::CALL => Self::Call(node.try_into()?),
             syntax::SCATTER => Self::Scatter(node.try_into()?),
             syntax::CONDITIONAL => Self::Conditional(node.try_into()?),
-            _ => bail!("Invalid scatter/conditional block element {:?}", node),
+            _ => bail!(ModelError::parser(format!(
+                "Invalid scatter/conditional block element {:?}",
+                node
+            ))),
         };
         Ok(element)
     }
 }
 
 impl<'a> TryFrom<TSNode<'a>> for WorkflowElement {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(node: TSNode<'a>) -> Result<Self> {
+    fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         let element = match node.kind() {
             syntax::INPUT => Self::Input(node.try_into()?),
             syntax::OUTPUT => Self::Output(node.try_into()?),
@@ -91,19 +121,26 @@ impl<'a> TryFrom<TSNode<'a>> for WorkflowElement {
             syntax::CONDITIONAL => Self::Conditional(node.try_into()?),
             syntax::META => Self::Meta(node.try_into()?),
             syntax::PARAMETER_META => Self::Meta(node.try_into()?),
-            _ => bail!("Invalid Task element {:?}", node),
+            _ => bail!(ModelError::parser(format!(
+                "Invalid Task element {:?}",
+                node
+            ))),
         };
         Ok(element)
     }
 }
 
 impl<'a> TryFrom<TSNode<'a>> for Workflow {
-    type Error = Error;
+    type Error = Report<ModelError>;
 
-    fn try_from(mut node: TSNode<'a>) -> Result<Self> {
+    fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
+        let mut children = node.into_children();
         Ok(Self {
-            name: node.field_string_node(syntax::NAME)?,
-            body: node.get_field_child_nodes(syntax::BODY)?,
+            name: children.next_field(syntax::NAME).try_into()?,
+            body: children
+                .next_field(syntax::BODY)
+                .into_children()
+                .collect_anchors()?,
         })
     }
 }
