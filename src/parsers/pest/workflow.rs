@@ -1,7 +1,7 @@
 use crate::{
     model::{
         Call, CallInput, Conditional, ModelError, QualifiedName, Scatter, Workflow,
-        WorkflowBodyElement, WorkflowElement,
+        WorkflowElement, WorkflowNestedElement,
     },
     parsers::pest::{node::PestNode, Rule},
 };
@@ -44,11 +44,7 @@ impl<'a> TryFrom<PestNode<'a>> for Call {
         } else {
             None
         };
-        let inputs = if let Some(inputs_node) = inner.next().transpose()? {
-            inputs_node.into_inner().collect_anchors()?
-        } else {
-            Vec::new()
-        };
+        let inputs = inner.collect_anchors()?;
         Ok(Self {
             target,
             alias,
@@ -82,11 +78,12 @@ impl<'a> TryFrom<PestNode<'a>> for Conditional {
     }
 }
 
-impl<'a> TryFrom<PestNode<'a>> for WorkflowBodyElement {
+impl<'a> TryFrom<PestNode<'a>> for WorkflowNestedElement {
     type Error = Report<ModelError>;
 
     fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         let e = match node.as_rule() {
+            Rule::bound_declaration => Self::Declaration(node.try_into()?),
             Rule::call => Self::Call(node.try_into()?),
             Rule::scatter => Self::Scatter(node.try_into()?),
             Rule::conditional => Self::Conditional(node.try_into()?),
@@ -106,6 +103,7 @@ impl<'a> TryFrom<PestNode<'a>> for WorkflowElement {
         let e = match node.as_rule() {
             Rule::input => Self::Input(node.try_into()?),
             Rule::output => Self::Output(node.try_into()?),
+            Rule::bound_declaration => Self::Declaration(node.try_into()?),
             Rule::meta => Self::Meta(node.try_into()?),
             Rule::parameter_meta => Self::ParameterMeta(node.try_into()?),
             Rule::call => Self::Call(node.try_into()?),

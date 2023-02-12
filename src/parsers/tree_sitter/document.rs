@@ -3,10 +3,7 @@ use crate::{
         Alias, Anchor, Document, DocumentElement, DocumentSource, Import, ModelError, Namespace,
         Struct, Version,
     },
-    parsers::tree_sitter::{
-        node::{TSNode, TSNodeIteratorResultExt, TSNodeResultExt},
-        syntax,
-    },
+    parsers::tree_sitter::{node::TSNode, syntax},
 };
 use error_stack::{bail, Report, Result};
 use std::convert::TryFrom;
@@ -17,8 +14,8 @@ impl<'a> TryFrom<TSNode<'a>> for Version {
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         Ok(Self {
             identifier: node
-                .try_into_child_field(syntax::IDENTIFIER)
-                .into_anchor_from_str()?,
+                .try_into_child_field(syntax::IDENTIFIER)?
+                .try_into_anchor_from_str()?,
         })
     }
 }
@@ -78,7 +75,7 @@ impl<'a> TryFrom<TSNode<'a>> for Struct {
         Ok(Self {
             name: children.next_field(syntax::NAME).try_into()?,
             fields: children
-                .next_field(syntax::FIELDS)
+                .next_field(syntax::FIELDS)?
                 .into_children()
                 .collect_anchors()?,
         })
@@ -108,7 +105,7 @@ impl<'a> TryFrom<TSNode<'a>> for Document {
         let mut children = node.into_children();
         let version = children.next_field(syntax::VERSION).try_into()?;
         let body = children
-            .next_field(syntax::BODY)
+            .next_field(syntax::BODY)?
             .into_children()
             .collect_anchors()?;
         let doc = Self {

@@ -8,6 +8,27 @@ use crate::{
 use error_stack::{bail, Report, Result};
 use std::convert::TryFrom;
 
+fn pest_meta_number<'a>(node: PestNode<'a>, negate: bool) -> Result<MetaValue, ModelError> {
+    let n = match node.as_rule() {
+        Rule::int => {
+            let mut i: Integer = node.try_into()?;
+            if negate {
+                i = i.negate();
+            }
+            MetaValue::Int(i)
+        }
+        Rule::float => {
+            let mut f: Float = node.try_into()?;
+            if negate {
+                f = f.negate();
+            }
+            MetaValue::Float(f)
+        }
+        _ => bail!(ModelError::parser(format!("Invalid number {:?}", node))),
+    };
+    Ok(n)
+}
+
 impl<'a> TryFrom<PestNode<'a>> for MetaStringPart {
     type Error = Report<ModelError>;
 
@@ -70,35 +91,13 @@ impl<'a> TryFrom<PestNode<'a>> for MetaObject {
     }
 }
 
-fn pest_meta_number<'a>(node: PestNode<'a>, negate: bool) -> Result<MetaValue, ModelError> {
-    let n = match node.as_rule() {
-        Rule::int => {
-            let mut i: Integer = node.try_into()?;
-            if negate {
-                i = i.negate();
-            }
-            MetaValue::Int(i)
-        }
-        Rule::float => {
-            let mut f: Float = node.try_into()?;
-            if negate {
-                f = f.negate();
-            }
-            MetaValue::Float(f)
-        }
-        _ => bail!(ModelError::parser(format!("Invalid number {:?}", node))),
-    };
-    Ok(n)
-}
-
 impl<'a> TryFrom<PestNode<'a>> for MetaValue {
     type Error = Report<ModelError>;
 
     fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         let value = match node.as_rule() {
             Rule::null => Self::Null,
-            Rule::true_literal => Self::Boolean(true),
-            Rule::false_literal => Self::Boolean(false),
+            Rule::boolean => Self::Boolean(node.try_into()?),
             Rule::meta_number => {
                 let mut inner = node.into_inner();
                 let first_node = inner.next_node()?;

@@ -3,10 +3,7 @@ use crate::{
         Alias, Anchor, Document, DocumentElement, DocumentSource, Import, ModelError, Namespace,
         Struct, Version,
     },
-    parsers::pest::{
-        node::{PestNode, PestNodeResultExt},
-        Rule,
-    },
+    parsers::pest::{node::PestNode, Rule},
 };
 use error_stack::{bail, Report, Result};
 use std::convert::TryFrom;
@@ -16,7 +13,7 @@ impl<'a> TryFrom<PestNode<'a>> for Version {
 
     fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         Ok(Self {
-            identifier: node.one_inner().into_anchor_from_str()?,
+            identifier: node.try_into_anchor_from_str()?,
         })
     }
 }

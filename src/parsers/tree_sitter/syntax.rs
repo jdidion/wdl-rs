@@ -64,7 +64,7 @@ name_const!(
     name,
     namespace,
     none,
-    nonempty_array_type,
+    nonempty,
     not_operator,
     null,
     object,

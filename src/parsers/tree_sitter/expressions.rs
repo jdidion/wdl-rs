@@ -4,10 +4,7 @@ use crate::{
         MapEntry, MapLiteral, ModelError, ObjectField, ObjectLiteral, PairLiteral, StringLiteral,
         StringPart, Ternary, Unary, UnaryOperator,
     },
-    parsers::tree_sitter::{
-        node::{TSNode, TSNodeIteratorResultExt, TSNodeResultExt},
-        syntax,
-    },
+    parsers::tree_sitter::{node::TSNode, syntax},
 };
 use error_stack::{bail, Report, Result};
 use std::{convert::TryFrom, str::FromStr};
@@ -35,7 +32,7 @@ impl<'a> TryFrom<TSNode<'a>> for StringLiteral {
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         Ok(Self {
             parts: node
-                .try_into_child_field(syntax::PARTS)
+                .try_into_child_field(syntax::PARTS)?
                 .into_children()
                 .collect_anchors()?,
         })
@@ -48,7 +45,7 @@ impl<'a> TryFrom<TSNode<'a>> for ArrayLiteral {
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         Ok(Self {
             elements: node
-                .try_into_child_field(syntax::ELEMENTS)
+                .try_into_child_field(syntax::ELEMENTS)?
                 .into_children()
                 .collect_anchors()?,
         })
@@ -73,7 +70,7 @@ impl<'a> TryFrom<TSNode<'a>> for MapLiteral {
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         Ok(Self {
             entries: node
-                .try_into_child_field(syntax::ENTRIES)
+                .try_into_child_field(syntax::ENTRIES)?
                 .into_children()
                 .collect_anchors()?,
         })
@@ -86,8 +83,10 @@ impl<'a> TryFrom<TSNode<'a>> for PairLiteral {
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         let mut children = node.into_children();
         Ok(Self {
-            left: children.next_field(syntax::LEFT).into_boxed_anchor()?,
-            right: children.next_field(syntax::RIGHT).into_boxed_anchor()?,
+            left: children.next_field(syntax::LEFT)?.try_into_boxed_anchor()?,
+            right: children
+                .next_field(syntax::RIGHT)?
+                .try_into_boxed_anchor()?,
         })
     }
 }
@@ -112,7 +111,7 @@ impl<'a> TryFrom<TSNode<'a>> for ObjectLiteral {
         Ok(Self {
             type_name: children.next_field(syntax::TYPE).try_into()?,
             fields: children
-                .next_field(syntax::FIELDS)
+                .next_field(syntax::FIELDS)?
                 .into_children()
                 .collect_anchors()?,
         })
@@ -133,10 +132,10 @@ impl<'a> TryFrom<TSNode<'a>> for Unary {
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         let mut children = node.into_children();
         Ok(Self {
-            operator: children.next_field(syntax::OPERATOR).into_element()?,
+            operator: children.next_field(syntax::OPERATOR)?.try_into()?,
             expression: children
-                .next_field(syntax::EXPRESSION)
-                .into_boxed_anchor()?,
+                .next_field(syntax::EXPRESSION)?
+                .try_into_boxed_anchor()?,
         })
     }
 }
@@ -154,12 +153,15 @@ impl<'a> TryFrom<TSNode<'a>> for Binary {
 
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         let mut children = node.into_children();
-        let left = children.next_field(syntax::LEFT).try_into()?;
-        let operator = children.next_field(syntax::OPERATOR).into_element()?;
-        let right = children.next_field(syntax::RIGHT).try_into()?;
+        let left = children.next_field(syntax::LEFT)?.try_into_boxed_anchor()?;
+        let operator = children.next_field(syntax::OPERATOR)?.try_into()?;
+        let right = children
+            .next_field(syntax::RIGHT)?
+            .try_into_boxed_anchor()?;
         Ok(Self {
             operator,
-            operands: vec![left, right],
+            left,
+            right,
         })
     }
 }
@@ -172,7 +174,7 @@ impl<'a> TryFrom<TSNode<'a>> for Apply {
         Ok(Self {
             name: children.next_field(syntax::NAME).try_into()?,
             arguments: children
-                .next_field(syntax::ARGUMENTS)
+                .next_field(syntax::ARGUMENTS)?
                 .into_children()
                 .collect_anchors()?,
         })
@@ -187,8 +189,8 @@ impl<'a> TryFrom<TSNode<'a>> for Access {
             syntax::INDEX_EXPRESSION => {
                 let mut children = node.into_children();
                 let collection = children
-                    .next_field(syntax::COLLECTION)
-                    .into_boxed_anchor()?;
+                    .next_field(syntax::COLLECTION)?
+                    .try_into_boxed_anchor()?;
                 let index = children.next_field(syntax::INDEX)?;
                 let index_span = index.as_span();
                 Ok(Self {
@@ -202,8 +204,8 @@ impl<'a> TryFrom<TSNode<'a>> for Access {
             syntax::FIELD_EXPRESSION => {
                 let mut children = node.into_children();
                 let collection = children
-                    .next_field(syntax::COLLECTION)
-                    .into_boxed_anchor()?;
+                    .next_field(syntax::COLLECTION)?
+                    .try_into_boxed_anchor()?;
                 let field = children.next_field(syntax::NAME)?;
                 let field_span = field.as_span();
                 Ok(Self {
@@ -225,9 +227,13 @@ impl<'a> TryFrom<TSNode<'a>> for Ternary {
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         let mut children = node.into_children();
         Ok(Self {
-            condition: children.next_field(syntax::CONDITION).into_boxed_anchor()?,
-            true_branch: children.next_field(syntax::TRUE).into_boxed_anchor()?,
-            false_branch: children.next_field(syntax::FALSE).into_boxed_anchor()?,
+            condition: children
+                .next_field(syntax::CONDITION)?
+                .try_into_boxed_anchor()?,
+            true_branch: children.next_field(syntax::TRUE)?.try_into_boxed_anchor()?,
+            false_branch: children
+                .next_field(syntax::FALSE)?
+                .try_into_boxed_anchor()?,
         })
     }
 }
@@ -256,8 +262,8 @@ impl<'a> TryFrom<TSNode<'a>> for Expression {
             syntax::INDEX_EXPRESSION | syntax::FIELD_EXPRESSION => Self::Access(node.try_into()?),
             syntax::TERNARY_EXPRESSION => Self::Ternary(node.try_into()?),
             syntax::GROUP_EXPRESSION => Self::Group(
-                node.try_into_child_field(syntax::EXPRESSION)
-                    .into_boxed_anchor()?,
+                node.try_into_child_field(syntax::EXPRESSION)?
+                    .try_into_boxed_anchor()?,
             ),
             syntax::IDENTIFIER => Self::Identifier(node.try_into()?),
             _ => bail!(ModelError::parser(format!("Invalid expression {:?}", node))),

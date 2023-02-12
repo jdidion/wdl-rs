@@ -30,6 +30,22 @@ impl<'a> PestNode<'a> {
         (&self.pair.as_span()).into()
     }
 
+    /// Tries to convert this node's string value to an `Anchor<T>`.
+    pub fn try_into_anchor_from_str<T: FromStr<Err = Report<ModelError>>>(
+        &self,
+    ) -> Result<Anchor<T>, ModelError> {
+        Ok(Anchor {
+            element: T::from_str(self.pair.as_str())?,
+            span: self.as_span(),
+        })
+    }
+
+    pub fn try_into_boxed_anchor<T: TryFrom<PestNode<'a>, Error = Report<ModelError>>>(
+        self,
+    ) -> Result<Box<Anchor<T>>, ModelError> {
+        Ok(Box::new(self.try_into()?))
+    }
+
     /// Returns an iterator over this node's inner nodes.
     pub fn into_inner(self) -> PestNodes<'a> {
         PestNodes {
@@ -82,49 +98,6 @@ impl<'a, T: TryFrom<PestNode<'a>, Error = Report<ModelError>>>
 
     fn try_from(res: Result<PestNode<'a>, ModelError>) -> Result<Self, ModelError> {
         res.and_then(|node| Ok(node.try_into()?))
-    }
-}
-
-/// Extension trait intended to be implemented on `Result<PestNode>`.
-pub trait PestNodeResultExt<'a> {
-    fn into_str(self) -> Result<&'a str, ModelError>;
-
-    fn into_string(self) -> Result<String, ModelError>;
-
-    fn into_anchor_from_str<T: FromStr<Err = Report<ModelError>>>(
-        self,
-    ) -> Result<Anchor<T>, ModelError>;
-
-    fn into_boxed_anchor<T: TryFrom<PestNode<'a>, Error = Report<ModelError>>>(
-        self,
-    ) -> Result<Box<Anchor<T>>, ModelError>;
-}
-
-impl<'a> PestNodeResultExt<'a> for Result<PestNode<'a>, ModelError> {
-    fn into_str(self) -> Result<&'a str, ModelError> {
-        self.map(|node| node.pair.as_str())
-    }
-
-    fn into_string(self) -> Result<String, ModelError> {
-        self.map(|node| node.pair.as_str().to_owned())
-    }
-
-    /// Tries to convert this node's string value to an `Anchor<T>`.
-    fn into_anchor_from_str<T: FromStr<Err = Report<ModelError>>>(
-        self,
-    ) -> Result<Anchor<T>, ModelError> {
-        self.and_then(|node| {
-            Ok(Anchor {
-                element: T::from_str(node.pair.as_str())?,
-                span: node.as_span(),
-            })
-        })
-    }
-
-    fn into_boxed_anchor<T: TryFrom<PestNode<'a>, Error = Report<ModelError>>>(
-        self,
-    ) -> Result<Box<Anchor<T>>, ModelError> {
-        self.and_then(|node| Ok(Box::new(node.try_into()?)))
     }
 }
 

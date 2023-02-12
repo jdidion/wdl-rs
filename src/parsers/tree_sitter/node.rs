@@ -87,6 +87,15 @@ impl<'a> TSNode<'a> {
         node_as_str(self.node, self.text)
     }
 
+    pub fn try_into_anchor_from_str<T: FromStr<Err = Report<ModelError>>>(
+        self,
+    ) -> Result<Anchor<T>, ModelError> {
+        Ok(Anchor {
+            span: self.as_span(),
+            element: T::from_str(self.try_as_str()?)?,
+        })
+    }
+
     pub fn try_field(&self) -> Result<&'a str, ModelError> {
         self.field.map(|field| Ok(field)).unwrap_or_else(|| {
             Err(report!(ModelError::parser(String::from(
@@ -106,6 +115,12 @@ impl<'a> TSNode<'a> {
                 ))))
             }
         })
+    }
+
+    pub fn try_into_boxed_anchor<T: TryFrom<TSNode<'a>, Error = Report<ModelError>>>(
+        self,
+    ) -> Result<Box<Anchor<T>>, ModelError> {
+        Ok(Box::new(self.try_into()?))
     }
 
     /// Consumes this node and returns an iterator over the non-comment children of this node,
@@ -174,57 +189,6 @@ impl<'a, T: TryFrom<TSNode<'a>, Error = Report<ModelError>>> TryFrom<Result<TSNo
 
     fn try_from(res: Result<TSNode<'a>, ModelError>) -> Result<Self, ModelError> {
         res.and_then(|node| Ok(node.try_into()?))
-    }
-}
-
-pub trait TSNodeResultExt<'a> {
-    fn into_string(self) -> Result<String, ModelError>;
-
-    fn into_element<T: TryFrom<TSNode<'a>, Error = Report<ModelError>>>(
-        self,
-    ) -> Result<T, ModelError>;
-
-    fn into_children(self) -> Result<TSNodeIterator<'a>, ModelError>;
-
-    fn into_anchor_from_str<T: FromStr<Err = Report<ModelError>>>(
-        self,
-    ) -> Result<Anchor<T>, ModelError>;
-
-    fn into_boxed_anchor<T: TryFrom<TSNode<'a>, Error = Report<ModelError>>>(
-        self,
-    ) -> Result<Box<Anchor<T>>, ModelError>;
-}
-
-impl<'a> TSNodeResultExt<'a> for Result<TSNode<'a>, ModelError> {
-    fn into_string(self) -> Result<String, ModelError> {
-        self.and_then(|node| Ok(node.try_into()?))
-    }
-
-    fn into_element<T: TryFrom<TSNode<'a>, Error = Report<ModelError>>>(
-        self,
-    ) -> Result<T, ModelError> {
-        self.and_then(|node| node.try_into())
-    }
-
-    fn into_children(self) -> Result<TSNodeIterator<'a>, ModelError> {
-        self.map(|node| node.into_children())
-    }
-
-    fn into_anchor_from_str<T: FromStr<Err = Report<ModelError>>>(
-        self,
-    ) -> Result<Anchor<T>, ModelError> {
-        self.and_then(|node| {
-            Ok(Anchor {
-                span: node.as_span(),
-                element: T::from_str(node.try_as_str()?)?,
-            })
-        })
-    }
-
-    fn into_boxed_anchor<T: TryFrom<TSNode<'a>, Error = Report<ModelError>>>(
-        self,
-    ) -> Result<Box<Anchor<T>>, ModelError> {
-        self.and_then(|node| Ok(Box::new(node.try_into()?)))
     }
 }
 
@@ -341,26 +305,36 @@ impl<'a> TSNodeIterator<'a> {
         }
     }
 
-    /// Same as `next()` but returns an `Err` if the iterator is exausted or if the next node
-    /// is not a field with the specified `name`.
-    pub fn next_field(&mut self, name: &'a str) -> Result<TSNode<'a>, ModelError> {
+    /// Same as `next()` but returns an `Err` if the next node is not `None` or a field with the
+    /// specified `name`.
+    pub fn get_next_field(&mut self, name: &'a str) -> Result<Option<TSNode<'a>>, ModelError> {
         match self.advance()? {
-            Some((node, Some(field))) if field == name => Ok(TSNode::new(
+            Some((node, Some(field))) if field == name => Ok(Some(TSNode::new(
                 node,
                 Some(field),
                 self.cursor.clone(),
                 self.text,
                 self.comments.clone(),
-            )),
-            Some((node, field)) => bail!(ModelError::parser(format!(
+            ))),
+            Some((node, field)) => Err(report!(ModelError::parser(format!(
                 "Expected next node to be a field with name {} but was {:?} (field: {:?})",
                 name, node, field
-            ))),
-            None => bail!(ModelError::parser(format!(
-                "Expected next node to be a field with name {} but iterator is exhausted",
-                name
-            ))),
+            )))),
+            None => Ok(None),
         }
+    }
+
+    /// Same as `next()` but returns an `Err` if the iterator is exausted or if the next node
+    /// is not a field with the specified `name`.
+    pub fn next_field(&mut self, name: &'a str) -> Result<TSNode<'a>, ModelError> {
+        self.get_next_field(name).and_then(|opt| {
+            opt.ok_or_else(|| {
+                report!(ModelError::parser(format!(
+                    "Expected next node to be a field with name {} but iterator is exhausted",
+                    name
+                )))
+            })
+        })
     }
 
     pub fn collect_anchors<T: TryFrom<TSNode<'a>, Error = Report<ModelError>>>(
@@ -416,19 +390,5 @@ impl<'a> Iterator for TSNodeIterator<'a> {
 impl<'a> Drop for TSNodeIterator<'a> {
     fn drop(&mut self) {
         self.drain(false).unwrap();
-    }
-}
-
-pub trait TSNodeIteratorResultExt<'a> {
-    fn collect_anchors<T: TryFrom<TSNode<'a>, Error = Report<ModelError>>>(
-        self,
-    ) -> Result<Vec<Anchor<T>>, ModelError>;
-}
-
-impl<'a> TSNodeIteratorResultExt<'a> for Result<TSNodeIterator<'a>, ModelError> {
-    fn collect_anchors<T: TryFrom<TSNode<'a>, Error = Report<ModelError>>>(
-        self,
-    ) -> Result<Vec<Anchor<T>>, ModelError> {
-        self.and_then(|mut itr| itr.collect_anchors())
     }
 }

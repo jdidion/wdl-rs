@@ -5,15 +5,13 @@ use crate::{
 use error_stack::{bail, Report, Result};
 use std::convert::TryFrom;
 
-use super::node::{TSNodeIteratorResultExt, TSNodeResultExt};
-
 impl<'a> TryFrom<TSNode<'a>> for Command {
     type Error = Report<ModelError>;
 
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         Ok(Self {
             parts: node
-                .try_into_child_field(syntax::PARTS)
+                .try_into_child_field(syntax::PARTS)?
                 .into_children()
                 .collect_anchors()?,
         })
@@ -38,7 +36,7 @@ impl<'a> TryFrom<TSNode<'a>> for Runtime {
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         Ok(Self {
             attributes: node
-                .try_into_child_field(syntax::ATTRIBUTES)
+                .try_into_child_field(syntax::ATTRIBUTES)?
                 .into_children()
                 .collect_anchors()?,
         })
@@ -74,7 +72,7 @@ impl<'a> TryFrom<TSNode<'a>> for Task {
         Ok(Self {
             name: children.next_field(syntax::NAME).try_into()?,
             body: children
-                .next_field(syntax::BODY)
+                .next_field(syntax::BODY)?
                 .into_children()
                 .collect_anchors()?,
         })

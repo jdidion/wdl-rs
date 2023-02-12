@@ -1,13 +1,10 @@
 use crate::{
     model::{
-        Access, AccessOperation, Apply, ArrayLiteral, Binary, BinaryOperator, Expression, MapEntry,
-        MapLiteral, ModelError, ObjectField, ObjectLiteral, PairLiteral, StringLiteral, StringPart,
-        Ternary, Unary, UnaryOperator,
+        Access, AccessOperation, Anchor, Apply, ArrayLiteral, Binary, BinaryOperator, Expression,
+        MapEntry, MapLiteral, ModelError, ObjectField, ObjectLiteral, PairLiteral, Span,
+        StringLiteral, StringPart, Ternary, Unary, UnaryOperator,
     },
-    parsers::pest::{
-        node::{PestNode, PestNodeResultExt},
-        Rule,
-    },
+    parsers::pest::{node::PestNode, Rule},
 };
 use error_stack::{bail, Report, Result};
 use std::{convert::TryFrom, str::FromStr};
@@ -19,9 +16,9 @@ impl<'a> TryFrom<PestNode<'a>> for StringPart {
         let part = match node.as_rule() {
             Rule::squote_literal
             | Rule::dquote_literal
-            | Rule::single_line_command_block_literal_sequence
-            | Rule::multi_line_command_block_literal_sequence
-            | Rule::command_heredoc_literal_sequence => Self::Literal(node.try_into()?),
+            | Rule::single_line_command_block_literal
+            | Rule::multi_line_command_block_literal
+            | Rule::command_heredoc_literal => Self::Literal(node.try_into()?),
             Rule::squote_escape_sequence
             | Rule::dquote_escape_sequence
             | Rule::command_block_escape_sequence
@@ -87,8 +84,8 @@ impl<'a> TryFrom<PestNode<'a>> for PairLiteral {
     fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         let mut inner = node.into_inner();
         Ok(Self {
-            left: inner.next_node().into_boxed_anchor()?,
-            right: inner.next_node().into_boxed_anchor()?,
+            left: inner.next_node()?.try_into_boxed_anchor()?,
+            right: inner.next_node()?.try_into_boxed_anchor()?,
         })
     }
 }
@@ -113,37 +110,6 @@ impl<'a> TryFrom<PestNode<'a>> for ObjectLiteral {
         Ok(Self {
             type_name: inner.next_node().try_into()?,
             fields: inner.collect_anchors()?,
-        })
-    }
-}
-
-impl<'a> TryFrom<PestNode<'a>> for Unary {
-    type Error = Report<ModelError>;
-
-    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
-        let rule = node.as_rule();
-        let mut inner = node.into_inner();
-        let operator = match rule {
-            Rule::negation => {
-                let sign_node = inner.next_node()?;
-                match sign_node.as_rule() {
-                    Rule::pos => UnaryOperator::Pos,
-                    Rule::neg => UnaryOperator::Neg,
-                    _ => bail!(ModelError::parser(format!(
-                        "Invalid unary operator {:?}",
-                        sign_node
-                    ))),
-                }
-            }
-            Rule::inversion => UnaryOperator::Not,
-            _ => bail!(ModelError::parser(format!(
-                "Invalid unary operator {:?}",
-                rule
-            ))),
-        };
-        Ok(Self {
-            operator,
-            expression: inner.next_node().into_boxed_anchor()?,
         })
     }
 }
@@ -174,7 +140,7 @@ impl<'a> TryFrom<PestNode<'a>> for AccessOperation {
     fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         let op = match node.as_rule() {
             Rule::index => Self::Index(Expression::try_from(node.one_inner()?)?),
-            Rule::field => Self::Field(node.one_inner().into_string()?),
+            Rule::field => Self::Field(node.one_inner()?.try_into()?),
             _ => bail!(ModelError::parser(format!(
                 "Invalid access operation {:?}",
                 node
@@ -184,40 +150,71 @@ impl<'a> TryFrom<PestNode<'a>> for AccessOperation {
     }
 }
 
-impl<'a> TryFrom<PestNode<'a>> for Access {
-    type Error = Report<ModelError>;
-
-    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
-        let mut inner = node.into_inner();
-        Ok(Self {
-            collection: inner.next_node().into_boxed_anchor()?,
-            accesses: inner.collect_anchors()?,
-        })
-    }
-}
-
 impl<'a> TryFrom<PestNode<'a>> for Ternary {
     type Error = Report<ModelError>;
 
     fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         let mut inner = node.into_inner();
         Ok(Self {
-            condition: inner.next_node().into_boxed_anchor()?,
-            true_branch: inner.next_node().into_boxed_anchor()?,
-            false_branch: inner.next_node().into_boxed_anchor()?,
+            condition: inner.next_node()?.try_into_boxed_anchor()?,
+            true_branch: inner.next_node()?.try_into_boxed_anchor()?,
+            false_branch: inner.next_node()?.try_into_boxed_anchor()?,
         })
     }
 }
 
-fn node_to_binary<'a>(
-    node: PestNode<'a>,
-    operator: BinaryOperator,
-) -> Result<Expression, ModelError> {
-    let operands = node.into_inner().collect_anchors()?;
-    if operands.len() == 1 {
-        Ok(operands.into_iter().next().unwrap().element)
+fn try_node_into_binary<'a>(node: PestNode<'a>) -> Result<Expression, ModelError> {
+    let mut inner = node.into_inner();
+    let first = inner.next_node()?;
+    let mut bin = if let Some(node) = inner.next() {
+        Binary {
+            operator: node?.try_into()?,
+            left: first.try_into_boxed_anchor()?,
+            right: inner.next_node()?.try_into_boxed_anchor()?,
+        }
     } else {
-        Ok(Expression::Binary(Binary { operator, operands }))
+        return first.try_into();
+    };
+    while let Some(node) = inner.next() {
+        let span = Span::from_range(&bin.left.span, &bin.right.span);
+        bin = Binary {
+            operator: node?.try_into()?,
+            left: Box::new(Anchor {
+                element: Expression::Binary(bin),
+                span,
+            }),
+            right: inner.next_node()?.try_into_boxed_anchor()?,
+        }
+    }
+    Ok(Expression::Binary(bin))
+}
+
+fn try_node_into_unary<'a>(node: PestNode<'a>) -> Result<Expression, ModelError> {
+    let mut inner = node.into_inner();
+    let first = inner.next_node()?;
+    let operator = match first.as_rule() {
+        Rule::pos => UnaryOperator::Pos,
+        Rule::neg => UnaryOperator::Neg,
+        Rule::not => UnaryOperator::Not,
+        _ => return first.try_into(),
+    };
+    Ok(Expression::Unary(Unary {
+        operator,
+        expression: inner.next_node()?.try_into_boxed_anchor()?,
+    }))
+}
+
+fn try_node_into_access<'a>(node: PestNode<'a>) -> Result<Expression, ModelError> {
+    let mut inner = node.into_inner();
+    let first = inner.next_node()?;
+    let accesses: Vec<Anchor<AccessOperation>> = inner.collect_anchors()?;
+    if accesses.is_empty() {
+        first.try_into()
+    } else {
+        Ok(Expression::Access(Access {
+            collection: first.try_into_boxed_anchor()?,
+            accesses,
+        }))
     }
 }
 
@@ -228,26 +225,18 @@ impl<'a> TryFrom<PestNode<'a>> for Expression {
         let expr_node = node.one_inner()?;
         let e = match expr_node.as_rule() {
             Rule::ternary => Self::Ternary(expr_node.try_into()?),
-            Rule::disjunction => node_to_binary(expr_node, BinaryOperator::Or)?,
-            Rule::conjunction => node_to_binary(expr_node, BinaryOperator::And)?,
-            Rule::equal => node_to_binary(expr_node, BinaryOperator::Eq)?,
-            Rule::not_equal => node_to_binary(expr_node, BinaryOperator::Neq)?,
-            Rule::greater_than_or_equal => node_to_binary(expr_node, BinaryOperator::Gte)?,
-            Rule::less_than_or_equal => node_to_binary(expr_node, BinaryOperator::Lte)?,
-            Rule::greater_than => node_to_binary(expr_node, BinaryOperator::Gt)?,
-            Rule::less_than => node_to_binary(expr_node, BinaryOperator::Lt)?,
-            Rule::addition => node_to_binary(expr_node, BinaryOperator::Add)?,
-            Rule::subtraction => node_to_binary(expr_node, BinaryOperator::Sub)?,
-            Rule::multiplication => node_to_binary(expr_node, BinaryOperator::Mul)?,
-            Rule::division => node_to_binary(expr_node, BinaryOperator::Div)?,
-            Rule::remainder => node_to_binary(expr_node, BinaryOperator::Mod)?,
-            Rule::negation | Rule::inversion => Self::Unary(expr_node.try_into()?),
+            Rule::disjunction
+            | Rule::conjunction
+            | Rule::equality
+            | Rule::comparison
+            | Rule::math1
+            | Rule::math2 => try_node_into_binary(expr_node)?,
+            Rule::unary => try_node_into_unary(expr_node)?,
+            Rule::access => try_node_into_access(expr_node)?,
             Rule::apply => Self::Apply(expr_node.try_into()?),
-            Rule::access => Self::Access(expr_node.try_into()?),
             Rule::none => Self::None,
-            Rule::true_literal => Self::Boolean(true),
-            Rule::false_literal => Self::Boolean(false),
-            Rule::int => Self::Int(expr_node.try_into()?),
+            Rule::boolean => Self::Boolean(expr_node.try_into()?),
+            Rule::hex_int | Rule::oct_int | Rule::dec_int => Self::Int(expr_node.try_into()?),
             Rule::float => Self::Float(expr_node.try_into()?),
             Rule::string => Self::String(expr_node.try_into()?),
             Rule::array => Self::Array(expr_node.try_into()?),
@@ -255,7 +244,7 @@ impl<'a> TryFrom<PestNode<'a>> for Expression {
             Rule::pair => Self::Pair(expr_node.try_into()?),
             Rule::object => Self::Object(expr_node.try_into()?),
             Rule::identifier => Self::Identifier(expr_node.try_into()?),
-            Rule::group => Self::Group(expr_node.one_inner().into_boxed_anchor()?),
+            Rule::group => Self::Group(expr_node.one_inner()?.try_into_boxed_anchor()?),
             _ => bail!(ModelError::parser(format!(
                 "Invalid expression {:?}",
                 expr_node

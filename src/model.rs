@@ -88,9 +88,16 @@ pub struct Span {
 impl Span {
     pub fn new(start: Position, end: Position) -> Self {
         if start < end {
-            Span { start, end }
+            Self { start, end }
         } else {
             panic!("Span start position must be less than end position")
+        }
+    }
+
+    pub fn from_range(left: &Self, right: &Self) -> Self {
+        Self {
+            start: left.start.clone(),
+            end: right.end.clone(),
         }
     }
 
@@ -479,7 +486,8 @@ impl Display for BinaryOperator {
 #[derive(Debug)]
 pub struct Binary {
     pub operator: BinaryOperator,
-    pub operands: Vec<Anchor<Expression>>,
+    pub left: InnerExpression,
+    pub right: InnerExpression,
 }
 
 #[derive(Debug)]
@@ -538,8 +546,7 @@ pub enum Type {
     Float,
     String,
     File,
-    Array(InnerType),
-    NonEmpty(InnerType),
+    Array { item: InnerType, non_empty: bool },
     Map { key: InnerType, value: InnerType },
     Pair { left: InnerType, right: InnerType },
     Object,
@@ -812,17 +819,18 @@ pub struct Call {
 pub struct Scatter {
     pub name: Anchor<String>,
     pub expression: Anchor<Expression>,
-    pub body: Vec<Anchor<WorkflowBodyElement>>,
+    pub body: Vec<Anchor<WorkflowNestedElement>>,
 }
 
 #[derive(Debug)]
 pub struct Conditional {
     pub expression: Anchor<Expression>,
-    pub body: Vec<Anchor<WorkflowBodyElement>>,
+    pub body: Vec<Anchor<WorkflowNestedElement>>,
 }
 
 #[derive(Debug)]
-pub enum WorkflowBodyElement {
+pub enum WorkflowNestedElement {
+    Declaration(BoundDeclaration),
     Call(Call),
     Scatter(Scatter),
     Conditional(Conditional),

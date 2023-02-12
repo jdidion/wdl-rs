@@ -2,10 +2,7 @@ use crate::{
     model::{
         BoundDeclaration, Input, InputDeclaration, ModelError, Output, Type, UnboundDeclaration,
     },
-    parsers::tree_sitter::{
-        node::{TSNode, TSNodeIteratorResultExt, TSNodeResultExt},
-        syntax,
-    },
+    parsers::tree_sitter::{node::TSNode, syntax},
 };
 use error_stack::{bail, Report, Result};
 use std::convert::TryFrom;
@@ -21,32 +18,34 @@ impl<'a> TryFrom<TSNode<'a>> for Type {
             syntax::STRING_TYPE => Self::String,
             syntax::FILE_TYPE => Self::File,
             syntax::OBJECT_TYPE => Self::Object,
-            syntax::NONEMPTY_ARRAY_TYPE => Self::NonEmpty(
-                node.try_into_child_field(syntax::TYPE)
-                    .into_boxed_anchor()?,
-            ),
-            syntax::ARRAY_TYPE => Self::Array(
-                node.try_into_child_field(syntax::TYPE)
-                    .into_boxed_anchor()?,
-            ),
+            syntax::ARRAY_TYPE => {
+                let mut children = node.into_children();
+                let item = children.next_field(syntax::TYPE)?.try_into_boxed_anchor()?;
+                let non_empty = children.get_next_field(syntax::NONEMPTY)?.is_some();
+                Self::Array { item, non_empty }
+            }
             syntax::MAP_TYPE => {
                 let mut children = node.into_children();
                 Self::Map {
-                    key: children.next_field(syntax::KEY).into_boxed_anchor()?,
-                    value: children.next_field(syntax::VALUE).into_boxed_anchor()?,
+                    key: children.next_field(syntax::KEY)?.try_into_boxed_anchor()?,
+                    value: children
+                        .next_field(syntax::VALUE)?
+                        .try_into_boxed_anchor()?,
                 }
             }
             syntax::PAIR_TYPE => {
                 let mut children = node.into_children();
                 Self::Pair {
-                    left: children.next_field(syntax::LEFT).into_boxed_anchor()?,
-                    right: children.next_field(syntax::RIGHT).into_boxed_anchor()?,
+                    left: children.next_field(syntax::LEFT)?.try_into_boxed_anchor()?,
+                    right: children
+                        .next_field(syntax::RIGHT)?
+                        .try_into_boxed_anchor()?,
                 }
             }
-            syntax::USER_TYPE => Self::User(node.try_into_child_field(syntax::NAME).into_string()?),
+            syntax::USER_TYPE => Self::User(node.try_into_child_field(syntax::NAME)?.try_into()?),
             syntax::OPTIONAL_TYPE => Self::Optional(
-                node.try_into_child_field(syntax::TYPE)
-                    .into_boxed_anchor()?,
+                node.try_into_child_field(syntax::TYPE)?
+                    .try_into_boxed_anchor()?,
             ),
             _ => bail!(ModelError::parser(format!("Invalid type {:?}", node))),
         };
@@ -101,7 +100,7 @@ impl<'a> TryFrom<TSNode<'a>> for Input {
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         Ok(Self {
             declarations: node
-                .try_into_child_field(syntax::DECLARATIONS)
+                .try_into_child_field(syntax::DECLARATIONS)?
                 .into_children()
                 .collect_anchors()?,
         })
@@ -114,7 +113,7 @@ impl<'a> TryFrom<TSNode<'a>> for Output {
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         Ok(Self {
             declarations: node
-                .try_into_child_field(syntax::DECLARATIONS)
+                .try_into_child_field(syntax::DECLARATIONS)?
                 .into_children()
                 .collect_anchors()?,
         })

@@ -9,9 +9,8 @@ impl<'a> TryFrom<PestNode<'a>> for Command {
     type Error = Report<ModelError>;
 
     fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
-        let command_body = node.one_inner()?;
         Ok(Self {
-            parts: command_body.into_inner().collect_anchors()?,
+            parts: node.into_inner().collect_anchors()?,
         })
     }
 }
@@ -45,9 +44,12 @@ impl<'a> TryFrom<PestNode<'a>> for TaskElement {
         let e = match node.as_rule() {
             Rule::input => Self::Input(node.try_into()?),
             Rule::output => Self::Output(node.try_into()?),
+            Rule::bound_declaration => Self::Declaration(node.try_into()?),
             Rule::meta => Self::Meta(node.try_into()?),
             Rule::parameter_meta => Self::ParameterMeta(node.try_into()?),
-            Rule::command => Self::Command(node.try_into()?),
+            Rule::command_heredoc
+            | Rule::single_line_command_block
+            | Rule::multi_line_command_block => Self::Command(node.try_into()?),
             Rule::runtime => Self::Runtime(node.try_into()?),
             _ => bail!(ModelError::parser(format!(
                 "Invalid task element {:?}",

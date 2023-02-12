@@ -1,12 +1,9 @@
 use crate::{
     model::{
         Call, CallInput, Conditional, ModelError, QualifiedName, Scatter, Workflow,
-        WorkflowBodyElement, WorkflowElement,
+        WorkflowElement, WorkflowNestedElement,
     },
-    parsers::tree_sitter::{
-        node::{TSNode, TSNodeIteratorResultExt, TSNodeResultExt},
-        syntax,
-    },
+    parsers::tree_sitter::{node::TSNode, syntax},
 };
 use error_stack::{bail, Report, Result};
 use std::convert::TryFrom;
@@ -69,7 +66,7 @@ impl<'a> TryFrom<TSNode<'a>> for Scatter {
             name: children.next_field(syntax::NAME).try_into()?,
             expression: children.next_field(syntax::EXPRESSION).try_into()?,
             body: children
-                .next_field(syntax::BODY)
+                .next_field(syntax::BODY)?
                 .into_children()
                 .collect_anchors()?,
         })
@@ -84,14 +81,14 @@ impl<'a> TryFrom<TSNode<'a>> for Conditional {
         Ok(Self {
             expression: children.next_field(syntax::EXPRESSION).try_into()?,
             body: children
-                .next_field(syntax::BODY)
+                .next_field(syntax::BODY)?
                 .into_children()
                 .collect_anchors()?,
         })
     }
 }
 
-impl<'a> TryFrom<TSNode<'a>> for WorkflowBodyElement {
+impl<'a> TryFrom<TSNode<'a>> for WorkflowNestedElement {
     type Error = Report<ModelError>;
 
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
@@ -138,7 +135,7 @@ impl<'a> TryFrom<TSNode<'a>> for Workflow {
         Ok(Self {
             name: children.next_field(syntax::NAME).try_into()?,
             body: children
-                .next_field(syntax::BODY)
+                .next_field(syntax::BODY)?
                 .into_children()
                 .collect_anchors()?,
         })

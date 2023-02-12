@@ -3,10 +3,7 @@ use crate::{
         Meta, MetaArray, MetaAttribute, MetaObject, MetaObjectField, MetaString, MetaStringPart,
         MetaValue, ModelError,
     },
-    parsers::tree_sitter::{
-        node::{TSNode, TSNodeIteratorResultExt, TSNodeResultExt},
-        syntax,
-    },
+    parsers::tree_sitter::{node::TSNode, syntax},
 };
 use error_stack::{bail, Report, Result};
 use std::convert::TryFrom;
@@ -43,7 +40,7 @@ impl<'a> TryFrom<TSNode<'a>> for MetaArray {
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         Ok(Self {
             elements: node
-                .try_into_child_field(syntax::ELEMENTS)
+                .try_into_child_field(syntax::ELEMENTS)?
                 .into_children()
                 .collect_anchors()?,
         })
@@ -68,7 +65,7 @@ impl<'a> TryFrom<TSNode<'a>> for MetaObject {
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         Ok(Self {
             fields: node
-                .try_into_child_field(syntax::FIELDS)
+                .try_into_child_field(syntax::FIELDS)?
                 .into_children()
                 .collect_anchors()?,
         })
@@ -112,7 +109,7 @@ impl<'a> TryFrom<TSNode<'a>> for Meta {
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         Ok(Self {
             attributes: node
-                .try_into_child_field(syntax::ATTRIBUTES)
+                .try_into_child_field(syntax::ATTRIBUTES)?
                 .into_children()
                 .collect_anchors()?,
         })
