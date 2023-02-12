@@ -7,7 +7,7 @@ use crate::{
     parsers::pest::{node::PestNode, Rule},
 };
 use error_stack::{bail, Report, Result};
-use std::{convert::TryFrom, str::FromStr};
+use std::convert::TryFrom;
 
 impl<'a> TryFrom<PestNode<'a>> for StringPart {
     type Error = Report<ModelError>;
@@ -118,7 +118,26 @@ impl<'a> TryFrom<PestNode<'a>> for BinaryOperator {
     type Error = Report<ModelError>;
 
     fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
-        Self::from_str(node.as_str())
+        let oper = match node.as_rule() {
+            Rule::add => Self::Add,
+            Rule::sub => Self::Sub,
+            Rule::mul => Self::Mul,
+            Rule::div => Self::Div,
+            Rule::rem => Self::Mod,
+            Rule::gt => Self::Gt,
+            Rule::lt => Self::Lt,
+            Rule::gte => Self::Gte,
+            Rule::lte => Self::Lte,
+            Rule::eq => Self::Eq,
+            Rule::neq => Self::Neq,
+            Rule::and => Self::And,
+            Rule::or => Self::Or,
+            _ => bail!(ModelError::Grammar {
+                kind: String::from("binary operator"),
+                value: node.as_str().to_owned()
+            }),
+        };
+        Ok(oper)
     }
 }
 
