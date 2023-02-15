@@ -1,6 +1,9 @@
 use crate::{
     model::{Command, ModelError, Runtime, RuntimeAttribute, Task, TaskElement},
-    parsers::tree_sitter::{node::TSNode, syntax},
+    parsers::tree_sitter::{
+        node::{TSIteratorExt, TSNode},
+        syntax::{fields, keywords, rules, symbols},
+    },
 };
 use error_stack::{bail, Report, Result};
 use std::convert::TryFrom;
@@ -9,12 +12,15 @@ impl<'a> TryFrom<TSNode<'a>> for Command {
     type Error = Report<ModelError>;
 
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
-        Ok(Self {
-            parts: node
-                .try_into_child_field(syntax::PARTS)?
-                .into_children()
-                .collect_anchors()?,
-        })
+        let mut children = node.into_children();
+        children.skip_terminal(keywords::COMMAND)?;
+        let _ = children.next_node()?.try_as_str()?;
+        let parts = if let Some(parts) = children.get_next_field(fields::PARTS)? {
+            parts.into_children().collect_anchors()?
+        } else {
+            Vec::new()
+        };
+        Ok(Self { parts })
     }
 }
 
@@ -23,10 +29,10 @@ impl<'a> TryFrom<TSNode<'a>> for RuntimeAttribute {
 
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         let mut children = node.into_children();
-        Ok(Self {
-            name: children.next_field(syntax::NAME).try_into()?,
-            expression: children.next_field(syntax::EXPRESSION).try_into()?,
-        })
+        let name = children.next_field(fields::NAME).try_into()?;
+        children.skip_terminal(symbols::COLON)?;
+        let expression = children.next_field(fields::EXPRESSION).try_into()?;
+        Ok(Self { name, expression })
     }
 }
 
@@ -34,10 +40,12 @@ impl<'a> TryFrom<TSNode<'a>> for Runtime {
     type Error = Report<ModelError>;
 
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
+        let mut children = node.into_children();
+        children.skip_terminal(keywords::RUNTIME)?;
         Ok(Self {
-            attributes: node
-                .try_into_child_field(syntax::ATTRIBUTES)?
-                .into_children()
+            attributes: children
+                .next_field(fields::ATTRIBUTES)?
+                .into_block(symbols::LBRACE, symbols::RBRACE)
                 .collect_anchors()?,
         })
     }
@@ -48,13 +56,13 @@ impl<'a> TryFrom<TSNode<'a>> for TaskElement {
 
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         let element = match node.kind() {
-            syntax::INPUT => Self::Input(node.try_into()?),
-            syntax::OUTPUT => Self::Output(node.try_into()?),
-            syntax::BOUND_DECLARATION => Self::Declaration(node.try_into()?),
-            syntax::COMMAND => Self::Command(node.try_into()?),
-            syntax::RUNTIME => Self::Runtime(node.try_into()?),
-            syntax::META => Self::Meta(node.try_into()?),
-            syntax::PARAMETER_META => Self::Meta(node.try_into()?),
+            rules::INPUT => Self::Input(node.try_into()?),
+            rules::OUTPUT => Self::Output(node.try_into()?),
+            rules::META => Self::Meta(node.try_into()?),
+            rules::PARAMETER_META => Self::ParameterMeta(node.try_into()?),
+            rules::BOUND_DECLARATION => Self::Declaration(node.try_into()?),
+            rules::COMMAND => Self::Command(node.try_into()?),
+            rules::RUNTIME => Self::Runtime(node.try_into()?),
             _ => bail!(ModelError::parser(format!(
                 "Invalid Task element {:?}",
                 node
@@ -69,11 +77,12 @@ impl<'a> TryFrom<TSNode<'a>> for Task {
 
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         let mut children = node.into_children();
+        children.skip_terminal(keywords::TASK)?;
         Ok(Self {
-            name: children.next_field(syntax::NAME).try_into()?,
+            name: children.next_field(fields::NAME).try_into()?,
             body: children
-                .next_field(syntax::BODY)?
-                .into_children()
+                .next_field(fields::BODY)?
+                .into_block(symbols::LBRACE, symbols::RBRACE)
                 .collect_anchors()?,
         })
     }

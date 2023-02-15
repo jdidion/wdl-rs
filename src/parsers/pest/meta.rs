@@ -1,7 +1,7 @@
 use crate::{
     model::{
         Float, Integer, Meta, MetaArray, MetaAttribute, MetaObject, MetaObjectField, MetaString,
-        MetaStringPart, MetaValue, ModelError,
+        MetaStringPart, MetaValue, ModelError, ParameterMeta,
     },
     parsers::pest::{node::PestNode, Rule},
 };
@@ -10,7 +10,7 @@ use std::convert::TryFrom;
 
 fn pest_meta_number<'a>(node: PestNode<'a>, negate: bool) -> Result<MetaValue, ModelError> {
     let n = match node.as_rule() {
-        Rule::int => {
+        Rule::dec_int | Rule::hex_int | Rule::oct_int => {
             let mut i: Integer = node.try_into()?;
             if negate {
                 i = i.negate();
@@ -109,7 +109,9 @@ impl<'a> TryFrom<PestNode<'a>> for MetaValue {
                     _ => pest_meta_number(first_node, false)?,
                 }
             }
-            Rule::simple_string => Self::String(node.try_into()?),
+            Rule::simple_dquote_string | Rule::simple_squote_string => {
+                Self::String(node.try_into()?)
+            }
             Rule::meta_array => Self::Array(node.try_into()?),
             Rule::meta_object => Self::Object(node.try_into()?),
             _ => bail!(ModelError::parser(format!("Invalid meta value {:?}", node))),
@@ -131,6 +133,16 @@ impl<'a> TryFrom<PestNode<'a>> for MetaAttribute {
 }
 
 impl<'a> TryFrom<PestNode<'a>> for Meta {
+    type Error = Report<ModelError>;
+
+    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
+        Ok(Self {
+            attributes: node.into_inner().collect_anchors()?,
+        })
+    }
+}
+
+impl<'a> TryFrom<PestNode<'a>> for ParameterMeta {
     type Error = Report<ModelError>;
 
     fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {

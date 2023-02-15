@@ -115,18 +115,20 @@ impl<'a> PestNodes<'a> {
 
     fn get_next_pair(&mut self) -> Result<Option<Pair<'a, Rule>>, ModelError> {
         while let Some(pair) = self.pairs.next() {
-            if pair.as_rule() == Rule::COMMENT {
-                let span: Span = (&pair.as_span()).into();
-                let mut comments = self.comments.borrow_mut();
-                comments.try_insert(
-                    span.start.line,
-                    Anchor {
-                        element: pair.as_str().to_owned(),
-                        span,
-                    },
-                )?;
-            } else {
-                return Ok(Some(pair));
+            match pair.as_rule() {
+                Rule::COMMENT => {
+                    let span: Span = (&pair.as_span()).into();
+                    let mut comments = self.comments.borrow_mut();
+                    comments.try_insert(
+                        span.start.line,
+                        Anchor {
+                            element: pair.as_str().to_owned(),
+                            span,
+                        },
+                    )?;
+                }
+                Rule::EOI => continue,
+                _ => return Ok(Some(pair)),
             }
         }
         Ok(None)

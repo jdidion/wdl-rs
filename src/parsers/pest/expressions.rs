@@ -257,7 +257,7 @@ impl<'a> TryFrom<PestNode<'a>> for Expression {
             Rule::boolean => Self::Boolean(expr_node.try_into()?),
             Rule::hex_int | Rule::oct_int | Rule::dec_int => Self::Int(expr_node.try_into()?),
             Rule::float => Self::Float(expr_node.try_into()?),
-            Rule::string => Self::String(expr_node.try_into()?),
+            Rule::dquote_string | Rule::squote_string => Self::String(expr_node.try_into()?),
             Rule::array => Self::Array(expr_node.try_into()?),
             Rule::map => Self::Map(expr_node.try_into()?),
             Rule::pair => Self::Pair(expr_node.try_into()?),

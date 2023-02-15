@@ -717,6 +717,11 @@ pub struct Meta {
 }
 
 #[derive(Debug)]
+pub struct ParameterMeta {
+    pub attributes: Vec<Anchor<MetaAttribute>>,
+}
+
+#[derive(Debug)]
 pub struct Command {
     pub parts: Vec<Anchor<StringPart>>,
 }
@@ -740,7 +745,7 @@ pub enum TaskElement {
     Command(Command),
     Runtime(Runtime),
     Meta(Meta),
-    ParameterMeta(Meta),
+    ParameterMeta(ParameterMeta),
 }
 
 impl TaskElement {
