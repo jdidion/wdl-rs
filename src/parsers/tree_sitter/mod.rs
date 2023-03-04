@@ -91,12 +91,12 @@ mod tests {
             .join(filename)
     }
 
-    // #[test]
-    // fn test_comprehensive() -> Result<(), WdlParserError> {
-    //     let mut parser = TreeSitterParser::new()?;
-    //     let wdl_file = test_path("comprehensive.wdl");
-    //     let doc = parser.parse_file(wdl_file)?;
-    //     tests::test_comprehensive(doc);
-    //     Ok(())
-    // }
+    #[test]
+    fn test_comprehensive() -> Result<(), WdlParserError> {
+        let mut parser = TreeSitterParser::new()?;
+        let wdl_file = test_path("comprehensive.wdl");
+        let doc = parser.parse_file(wdl_file)?;
+        tests::test_comprehensive(doc);
+        Ok(())
+    }
 }
