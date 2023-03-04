@@ -3,14 +3,12 @@ use crate::{
         BoundDeclaration, Input, InputDeclaration, ModelError, Output, Type, UnboundDeclaration,
     },
     parsers::tree_sitter::{
-        node::TSNode,
+        node::{BlockDelim, BlockEnds, TSNode},
         syntax::{fields, keywords, rules, symbols},
     },
 };
 use error_stack::{bail, Report, Result};
 use std::convert::TryFrom;
-
-use super::node::TSIteratorExt;
 
 impl<'a> TryFrom<TSNode<'a>> for Type {
     type Error = Report<ModelError>;
@@ -35,6 +33,7 @@ impl<'a> TryFrom<TSNode<'a>> for Type {
             rules::MAP_TYPE => {
                 let mut children = node.into_children();
                 children.skip_terminal(keywords::MAP)?;
+                children.skip_terminal(symbols::LBRACK)?;
                 let key = children.next_field(fields::KEY)?.try_into_boxed_anchor()?;
                 children.skip_terminal(symbols::COMMA)?;
                 let value = children
@@ -45,6 +44,7 @@ impl<'a> TryFrom<TSNode<'a>> for Type {
             rules::PAIR_TYPE => {
                 let mut children = node.into_children();
                 children.skip_terminal(keywords::PAIR)?;
+                children.skip_terminal(symbols::LPAREN)?;
                 let left = children.next_field(fields::LEFT)?.try_into_boxed_anchor()?;
                 children.skip_terminal(symbols::COMMA)?;
                 let right = children
@@ -52,11 +52,16 @@ impl<'a> TryFrom<TSNode<'a>> for Type {
                     .try_into_boxed_anchor()?;
                 Self::Pair { left, right }
             }
-            rules::USER_TYPE => Self::User(node.try_into_child_field(fields::NAME)?.try_into()?),
-            rules::OPTIONAL_TYPE => Self::Optional(
-                node.try_into_child_field(fields::TYPE)?
-                    .try_into_boxed_anchor()?,
-            ),
+            rules::USER_TYPE => {
+                let mut children = node.into_children();
+                Self::User(children.next_field(fields::NAME)?.try_into()?)
+            }
+            rules::OPTIONAL_TYPE => {
+                let mut children = node.into_children();
+                let wdl_type = children.next_field(fields::TYPE)?.try_into_boxed_anchor()?;
+                children.skip_terminal(symbols::OPTIONAL)?;
+                Self::Optional(wdl_type)
+            }
             _ => bail!(ModelError::parser(format!("Invalid type {:?}", node))),
         };
         Ok(t)
@@ -67,11 +72,12 @@ impl<'a> TryFrom<TSNode<'a>> for UnboundDeclaration {
     type Error = Report<ModelError>;
 
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
-        println!("unbound declaration");
         let mut children = node.into_children();
+        let wdl_type = children.next_field(fields::TYPE).try_into()?;
+        let name = children.next_field(fields::NAME).try_into()?;
         Ok(Self {
-            wdl_type: children.next_field(fields::TYPE).try_into()?,
-            name: children.next_field(fields::NAME).try_into()?,
+            type_: wdl_type,
+            name,
         })
     }
 }
@@ -86,7 +92,7 @@ impl<'a> TryFrom<TSNode<'a>> for BoundDeclaration {
         children.skip_terminal(symbols::ASSIGN)?;
         let expression = children.next_field(fields::EXPRESSION).try_into()?;
         Ok(Self {
-            wdl_type,
+            type_: wdl_type,
             name,
             expression,
         })
@@ -115,12 +121,11 @@ impl<'a> TryFrom<TSNode<'a>> for Input {
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         let mut children = node.into_children();
         children.skip_terminal(keywords::INPUT)?;
-        Ok(Self {
-            declarations: children
-                .next_field(fields::DECLARATIONS)?
-                .into_block(symbols::LBRACE, symbols::RBRACE)
-                .collect_anchors()?,
-        })
+        let declarations = children
+            .next_field(fields::DECLARATIONS)?
+            .into_block(BlockEnds::Braces, BlockDelim::None)
+            .collect_anchors()?;
+        Ok(Self { declarations })
     }
 }
 
@@ -130,11 +135,10 @@ impl<'a> TryFrom<TSNode<'a>> for Output {
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         let mut children = node.into_children();
         children.skip_terminal(keywords::OUTPUT)?;
-        Ok(Self {
-            declarations: children
-                .next_field(fields::DECLARATIONS)?
-                .into_block(symbols::LBRACE, symbols::RBRACE)
-                .collect_anchors()?,
-        })
+        let declarations = children
+            .next_field(fields::DECLARATIONS)?
+            .into_block(BlockEnds::Braces, BlockDelim::None)
+            .collect_anchors()?;
+        Ok(Self { declarations })
     }
 }

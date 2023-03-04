@@ -158,8 +158,11 @@ pub mod symbols {
         lbrace => "{",
         lbrack => "[",
         lparen => "(",
+        optional => "?",
         rbrace => "}",
         rbrack => "]",
-        rparen => ")"
+        rparen => ")",
+        squote => "'",
+        dquote => "\""
     );
 }

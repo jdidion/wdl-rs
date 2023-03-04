@@ -1,7 +1,7 @@
 use crate::{
     model::{Command, ModelError, Runtime, RuntimeAttribute, Task, TaskElement},
     parsers::tree_sitter::{
-        node::{TSIteratorExt, TSNode},
+        node::{BlockDelim, BlockEnds, TSNode},
         syntax::{fields, keywords, rules, symbols},
     },
 };
@@ -42,12 +42,11 @@ impl<'a> TryFrom<TSNode<'a>> for Runtime {
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         let mut children = node.into_children();
         children.skip_terminal(keywords::RUNTIME)?;
-        Ok(Self {
-            attributes: children
-                .next_field(fields::ATTRIBUTES)?
-                .into_block(symbols::LBRACE, symbols::RBRACE)
-                .collect_anchors()?,
-        })
+        let attributes = children
+            .next_field(fields::ATTRIBUTES)?
+            .into_block(BlockEnds::Braces, BlockDelim::None)
+            .collect_anchors()?;
+        Ok(Self { attributes })
     }
 }
 
@@ -78,12 +77,11 @@ impl<'a> TryFrom<TSNode<'a>> for Task {
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         let mut children = node.into_children();
         children.skip_terminal(keywords::TASK)?;
-        Ok(Self {
-            name: children.next_field(fields::NAME).try_into()?,
-            body: children
-                .next_field(fields::BODY)?
-                .into_block(symbols::LBRACE, symbols::RBRACE)
-                .collect_anchors()?,
-        })
+        let name = children.next_field(fields::NAME).try_into()?;
+        let body = children
+            .next_field(fields::BODY)?
+            .into_block(BlockEnds::Braces, BlockDelim::None)
+            .collect_anchors()?;
+        Ok(Self { name, body })
     }
 }

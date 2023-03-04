@@ -6,14 +6,15 @@ use crate::{
     parsers::pest::{node::PestNode, Rule},
 };
 use error_stack::{bail, Report, Result};
-use std::convert::TryFrom;
+use std::{convert::TryFrom, ops::Deref};
 
 impl<'a> TryFrom<PestNode<'a>> for Version {
     type Error = Report<ModelError>;
 
     fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
+        let mut inner = node.into_inner();
         Ok(Self {
-            identifier: node.try_into_anchor_from_str()?,
+            identifier: inner.next_node()?.try_into_anchor_from_str()?,
         })
     }
 }
@@ -22,7 +23,7 @@ impl<'a> TryFrom<PestNode<'a>> for Namespace {
     type Error = Report<ModelError>;
 
     fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
-        Ok(Self::Explicit(node.try_into()?))
+        Ok(Self::Explicit(node.into_inner().next_node()?.try_into()?))
     }
 }
 
@@ -38,16 +39,25 @@ impl<'a> TryFrom<PestNode<'a>> for Alias {
     }
 }
 
+fn uri_string(node: PestNode) -> Result<Anchor<String>, ModelError> {
+    let span = node.as_span();
+    let parts: Result<Vec<PestNode>, ModelError> = node.into_inner().collect();
+    Ok(Anchor::new(
+        parts?.into_iter().map(|node| node.as_str()).collect(),
+        span,
+    ))
+}
+
 impl<'a> TryFrom<PestNode<'a>> for Import {
     type Error = Report<ModelError>;
 
     fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         let mut inner = node.into_inner();
-        let uri: Anchor<String> = inner.next_node().try_into()?;
+        let uri: Anchor<String> = uri_string(inner.next_node()?)?;
         let namespace = if let Some(Rule::namespace) = inner.peek_rule() {
             Namespace::try_from(inner.next_node()?)?
         } else {
-            Namespace::from_uri(&uri.element)
+            Namespace::from_uri(uri.deref())
         };
         let aliases = inner.collect_anchors()?;
         Ok(Self {

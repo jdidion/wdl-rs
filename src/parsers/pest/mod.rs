@@ -14,8 +14,8 @@ use crate::{
 use error_stack::{IntoReport, Result, ResultExt};
 use pest::error::{Error as PestError, InputLocation, LineColLocation};
 use pest_wdl_1 as wdl;
+use pest_wdl_1::Rule;
 use std::{cell::RefCell, rc::Rc};
-use wdl::Rule;
 
 pub struct PestParser;
 
@@ -50,8 +50,8 @@ impl<'a> From<pest::Position<'a>> for Position {
     fn from(value: pest::Position<'a>) -> Self {
         let (line, column) = value.line_col();
         Self {
-            line,
-            column,
+            line: line - 1,
+            column: column - 1,
             offset: value.pos(),
         }
     }
@@ -78,14 +78,14 @@ impl From<PestError<Rule>> for Span {
         };
         Self {
             start: Position {
-                line: start_line,
-                column: start_column,
-                offset: start_offset,
+                line: start_line - 1,
+                column: start_column - 1,
+                offset: start_offset - 1,
             },
             end: Position {
-                line: end_line,
-                column: end_column,
-                offset: end_offset,
+                line: end_line - 1,
+                column: end_column - 1,
+                offset: end_offset - 1,
             },
         }
     }
@@ -94,7 +94,7 @@ impl From<PestError<Rule>> for Span {
 #[cfg(test)]
 mod tests {
     use crate::{
-        model::VersionIdentifier,
+        model::tests,
         parsers::{pest::PestParser, WdlParser, WdlParserError},
     };
     use error_stack::Result;
@@ -112,7 +112,7 @@ mod tests {
         let mut parser = PestParser::new();
         let wdl_file = test_path("comprehensive.wdl");
         let doc = parser.parse_file(wdl_file)?;
-        assert_eq!(*(*doc.version).identifier, VersionIdentifier::V1_1);
+        tests::test_comprehensive(doc);
         Ok(())
     }
 }

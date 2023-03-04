@@ -1,5 +1,5 @@
 use crate::{
-    model::{Anchor, Comments, ModelError, SourceFragment, Span},
+    model::{Anchor, Comments, InnerSpan, ModelError, SourceFragment, Span},
     parsers::pest::Rule,
 };
 use error_stack::{report, Report, Result};
@@ -34,16 +34,31 @@ impl<'a> PestNode<'a> {
     pub fn try_into_anchor_from_str<T: FromStr<Err = Report<ModelError>>>(
         &self,
     ) -> Result<Anchor<T>, ModelError> {
-        Ok(Anchor {
-            element: T::from_str(self.pair.as_str())?,
-            span: self.as_span(),
-        })
+        Ok(Anchor::new(
+            T::from_str(self.pair.as_str())?,
+            self.as_span(),
+        ))
     }
 
     pub fn try_into_boxed_anchor<T: TryFrom<PestNode<'a>, Error = Report<ModelError>>>(
         self,
     ) -> Result<Box<Anchor<T>>, ModelError> {
         Ok(Box::new(self.try_into()?))
+    }
+
+    pub fn try_into_anchor_with_inner_span<
+        T: TryFrom<PestNode<'a>, Error = Report<ModelError>> + InnerSpan + std::fmt::Debug,
+    >(
+        self,
+    ) -> Result<Anchor<T>, ModelError> {
+        let element: T = T::try_from(self)?;
+        let span: Result<Span, ModelError> = element.get_inner_span().ok_or_else(|| {
+            report!(ModelError::parser(format!(
+                "element has no inner span {:?}",
+                element
+            )))
+        });
+        Ok(Anchor::new(element, span?))
     }
 
     /// Returns an iterator over this node's inner nodes.
@@ -84,10 +99,8 @@ impl<'a, T: TryFrom<PestNode<'a>, Error = Report<ModelError>>> TryFrom<PestNode<
     type Error = Report<ModelError>;
 
     fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
-        Ok(Self {
-            span: node.as_span(),
-            element: node.try_into()?,
-        })
+        let span = node.as_span();
+        Ok(Self::new(node.try_into()?, span))
     }
 }
 
@@ -119,13 +132,8 @@ impl<'a> PestNodes<'a> {
                 Rule::COMMENT => {
                     let span: Span = (&pair.as_span()).into();
                     let mut comments = self.comments.borrow_mut();
-                    comments.try_insert(
-                        span.start.line,
-                        Anchor {
-                            element: pair.as_str().to_owned(),
-                            span,
-                        },
-                    )?;
+                    comments
+                        .try_insert(span.start.line, Anchor::new(pair.as_str().to_owned(), span))?;
                 }
                 Rule::EOI => continue,
                 _ => return Ok(Some(pair)),
@@ -145,6 +153,10 @@ impl<'a> PestNodes<'a> {
         })
     }
 
+    pub fn collect_nodes(self) -> Result<Vec<PestNode<'a>>, ModelError> {
+        self.collect()
+    }
+
     /// Collects `Anchor<T>`s for all remaining pairs into a `Vec`.
     pub fn collect_anchors<T: TryFrom<PestNode<'a>, Error = Report<ModelError>>>(
         self,
@@ -152,9 +164,14 @@ impl<'a> PestNodes<'a> {
         self.map(|node| node.try_into()).collect()
     }
 
-    /// Collects `Anchor<String>`s for all remaining pairs into a `Vec`.
-    pub fn collect_string_anchors(self) -> Result<Vec<Anchor<String>>, ModelError> {
-        self.map(|node| node.try_into()).collect()
+    /// Collects `Anchor<T>`s for all remaining pairs into a `Vec`.
+    pub fn collect_anchors_with_inner_spans<
+        T: TryFrom<PestNode<'a>, Error = Report<ModelError>> + std::fmt::Debug + InnerSpan,
+    >(
+        self,
+    ) -> Result<Vec<Anchor<T>>, ModelError> {
+        self.map(|res| res.and_then(|node| node.try_into_anchor_with_inner_span()))
+            .collect()
     }
 }
 

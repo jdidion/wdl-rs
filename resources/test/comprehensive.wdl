@@ -1,7 +1,6 @@
-
 version 1.1
 
-import "local.wdl" as local alias Foo as Bar
+import "local.wdl" alias Foo as Bar
 import "https://example.com/remote.wdl" as remote alias Baz as Blorf
 
 struct Example1 {

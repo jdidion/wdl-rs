@@ -4,12 +4,12 @@ use crate::{
         Struct, Version,
     },
     parsers::tree_sitter::{
-        node::{TSIteratorExt, TSNode},
-        syntax::{fields, keywords, rules, symbols},
+        node::{BlockDelim, BlockEnds, TSNode},
+        syntax::{fields, keywords, rules},
     },
 };
 use error_stack::{bail, Report, Result};
-use std::convert::TryFrom;
+use std::{convert::TryFrom, ops::Deref};
 
 impl<'a> TryFrom<TSNode<'a>> for Version {
     type Error = Report<ModelError>;
@@ -17,11 +17,10 @@ impl<'a> TryFrom<TSNode<'a>> for Version {
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         let mut children = node.into_children();
         children.skip_terminal(keywords::VERSION)?;
-        Ok(Self {
-            identifier: children
-                .next_field(fields::IDENTIFIER)?
-                .try_into_anchor_from_str()?,
-        })
+        let identifier = children
+            .next_field(fields::IDENTIFIER)?
+            .try_into_anchor_from_str()?;
+        Ok(Self { identifier })
     }
 }
 
@@ -46,24 +45,40 @@ impl<'a> TryFrom<TSNode<'a>> for Alias {
     }
 }
 
+fn uri_string<'a>(node: TSNode<'a>) -> Result<Anchor<String>, ModelError> {
+    let span = node.as_span();
+    let node_parts: Result<Vec<TSNode<'a>>, ModelError> = node
+        .into_block(BlockEnds::Quotes, BlockDelim::None)
+        .collect();
+    let str_parts: Result<Vec<&str>, ModelError> = node_parts?
+        .into_iter()
+        .map(|node| node.try_as_str())
+        .collect();
+    Ok(Anchor::new(str_parts?.join(""), span))
+}
+
 impl<'a> TryFrom<TSNode<'a>> for Import {
     type Error = Report<ModelError>;
 
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         let mut children = node.into_children();
         children.skip_terminal(keywords::IMPORT)?;
-        let uri: Anchor<String> = children.next_field(fields::URI).try_into()?;
-        let namespace = if children.skip_optional(keywords::AS)? {
-            children.next_field(fields::NAMESPACE)?.try_into()?
-        } else {
-            Namespace::from_uri(&uri.element)
+        let uri: Anchor<String> = uri_string(children.next_field(fields::URI)?)?;
+        let next = children.next().transpose()?;
+        let (namespace, next) = match next {
+            Some(node) if node.kind() == keywords::AS => (
+                children.next_field(fields::NAMESPACE)?.try_into()?,
+                children.next().transpose()?,
+            ),
+            _ => (Namespace::from_uri(uri.deref()), next),
         };
-        let aliases = if let Some(next) = children.get_next_field(fields::ALIASES)? {
-            next.into_children().collect_anchors()?
-        } else {
-            Vec::new()
-        };
-        println!("returning from import");
+        let aliases = next
+            .map(|node| {
+                node.ensure_field(fields::ALIASES)?;
+                node.into_children().collect_anchors()
+            })
+            .transpose()?
+            .unwrap_or_else(|| Vec::new());
         Ok(Self {
             uri,
             namespace,
@@ -78,13 +93,12 @@ impl<'a> TryFrom<TSNode<'a>> for Struct {
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         let mut children = node.into_children();
         children.skip_terminal(keywords::STRUCT)?;
-        Ok(Self {
-            name: children.next_field(fields::NAME).try_into()?,
-            fields: children
-                .next_field(fields::FIELDS)?
-                .into_block(symbols::LBRACE, symbols::RBRACE)
-                .collect_anchors()?,
-        })
+        let name = children.next_field(fields::NAME).try_into()?;
+        let fields = children
+            .next_field(fields::FIELDS)?
+            .into_block(BlockEnds::Braces, BlockDelim::None)
+            .collect_anchors()?;
+        Ok(Self { name, fields })
     }
 }
 
@@ -92,7 +106,6 @@ impl<'a> TryFrom<TSNode<'a>> for DocumentElement {
     type Error = Report<ModelError>;
 
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
-        println!("before DocumentElement");
         let element = match node.kind() {
             rules::IMPORT => Self::Import(node.try_into()?),
             rules::STRUCT => Self::Struct(node.try_into()?),
@@ -100,7 +113,6 @@ impl<'a> TryFrom<TSNode<'a>> for DocumentElement {
             rules::WORKFLOW => Self::Workflow(node.try_into()?),
             other => bail!(ModelError::parser(format!("Invalid node {}", other))),
         };
-
         Ok(element)
     }
 }

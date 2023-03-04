@@ -1,10 +1,13 @@
 use crate::{
     model::{
         Access, AccessOperation, Anchor, Apply, ArrayLiteral, Binary, BinaryOperator, Expression,
-        MapEntry, MapLiteral, ModelError, ObjectField, ObjectLiteral, PairLiteral, Span,
+        InnerSpan, MapEntry, MapLiteral, ModelError, ObjectField, ObjectLiteral, PairLiteral, Span,
         StringLiteral, StringPart, Ternary, Unary, UnaryOperator,
     },
-    parsers::pest::{node::PestNode, Rule},
+    parsers::pest::{
+        node::{PestNode, PestNodes},
+        Rule,
+    },
 };
 use error_stack::{bail, Report, Result};
 use std::convert::TryFrom;
@@ -18,7 +21,7 @@ impl<'a> TryFrom<PestNode<'a>> for StringPart {
             | Rule::dquote_literal
             | Rule::single_line_command_block_literal
             | Rule::multi_line_command_block_literal
-            | Rule::command_heredoc_literal => Self::Literal(node.try_into()?),
+            | Rule::command_heredoc_literal => Self::Content(node.try_into()?),
             Rule::squote_escape_sequence
             | Rule::dquote_escape_sequence
             | Rule::command_block_escape_sequence
@@ -39,9 +42,8 @@ impl<'a> TryFrom<PestNode<'a>> for StringLiteral {
     type Error = Report<ModelError>;
 
     fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
-        let inner = node.one_inner()?;
         Ok(Self {
-            parts: inner.into_inner().collect_anchors()?,
+            parts: node.into_inner().collect_anchors()?,
         })
     }
 }
@@ -50,8 +52,14 @@ impl<'a> TryFrom<PestNode<'a>> for ArrayLiteral {
     type Error = Report<ModelError>;
 
     fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
+        let elements: Result<Vec<Anchor<Expression>>, ModelError> = node
+            .into_inner()
+            .collect_nodes()?
+            .into_iter()
+            .map(|node| try_into_expression_anchor(node))
+            .collect();
         Ok(Self {
-            elements: node.into_inner().collect_anchors()?,
+            elements: elements?,
         })
     }
 }
@@ -63,7 +71,7 @@ impl<'a> TryFrom<PestNode<'a>> for MapEntry {
         let mut inner = node.into_inner();
         Ok(Self {
             key: inner.next_node().try_into()?,
-            value: inner.next_node().try_into()?,
+            value: try_into_expression_anchor(inner.next_node()?)?,
         })
     }
 }
@@ -84,8 +92,8 @@ impl<'a> TryFrom<PestNode<'a>> for PairLiteral {
     fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         let mut inner = node.into_inner();
         Ok(Self {
-            left: inner.next_node()?.try_into_boxed_anchor()?,
-            right: inner.next_node()?.try_into_boxed_anchor()?,
+            left: Box::new(try_into_expression_anchor(inner.next_node()?)?),
+            right: Box::new(try_into_expression_anchor(inner.next_node()?)?),
         })
     }
 }
@@ -97,7 +105,7 @@ impl<'a> TryFrom<PestNode<'a>> for ObjectField {
         let mut inner = node.into_inner();
         Ok(Self {
             name: inner.next_node().try_into()?,
-            expression: inner.next_node().try_into()?,
+            expression: try_into_expression_anchor(inner.next_node()?)?,
         })
     }
 }
@@ -111,6 +119,23 @@ impl<'a> TryFrom<PestNode<'a>> for ObjectLiteral {
             type_name: inner.next_node().try_into()?,
             fields: inner.collect_anchors()?,
         })
+    }
+}
+
+impl<'a> TryFrom<PestNode<'a>> for UnaryOperator {
+    type Error = Report<ModelError>;
+
+    fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
+        let oper = match node.as_rule() {
+            Rule::pos => UnaryOperator::Pos,
+            Rule::neg => UnaryOperator::Neg,
+            Rule::not => UnaryOperator::Not,
+            _ => bail!(ModelError::Grammar {
+                kind: String::from("unary operator"),
+                value: node.as_str().to_owned()
+            }),
+        };
+        Ok(oper)
     }
 }
 
@@ -146,9 +171,15 @@ impl<'a> TryFrom<PestNode<'a>> for Apply {
 
     fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         let mut inner = node.into_inner();
+        let name = inner.next_node().try_into()?;
+        let arguments: Result<Vec<Anchor<Expression>>, ModelError> = inner
+            .collect_nodes()?
+            .into_iter()
+            .map(|node| try_into_expression_anchor(node))
+            .collect();
         Ok(Self {
-            name: inner.next_node().try_into()?,
-            arguments: inner.collect_anchors()?,
+            name,
+            arguments: arguments?,
         })
     }
 }
@@ -175,65 +206,134 @@ impl<'a> TryFrom<PestNode<'a>> for Ternary {
     fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         let mut inner = node.into_inner();
         Ok(Self {
-            condition: inner.next_node()?.try_into_boxed_anchor()?,
-            true_branch: inner.next_node()?.try_into_boxed_anchor()?,
-            false_branch: inner.next_node()?.try_into_boxed_anchor()?,
+            condition: Box::new(try_into_expression_anchor(inner.next_node()?)?),
+            true_branch: Box::new(try_into_expression_anchor(inner.next_node()?)?),
+            false_branch: Box::new(try_into_expression_anchor(inner.next_node()?)?),
         })
     }
 }
 
-fn try_node_into_binary<'a>(node: PestNode<'a>) -> Result<Expression, ModelError> {
-    let mut inner = node.into_inner();
-    let first = inner.next_node()?;
-    let mut bin = if let Some(node) = inner.next() {
-        Binary {
-            operator: node?.try_into()?,
-            left: first.try_into_boxed_anchor()?,
-            right: inner.next_node()?.try_into_boxed_anchor()?,
-        }
-    } else {
-        return first.try_into();
+fn try_into_unary<'a>(first: PestNode<'a>, second: PestNode<'a>) -> Result<Expression, ModelError> {
+    let operator = first.try_into()?;
+    Ok(Expression::Unary(Unary {
+        operator,
+        expression: Box::new(try_into_expression_anchor(second)?),
+    }))
+}
+
+fn try_into_binary<'a>(
+    first: PestNode<'a>,
+    mut rest: PestNodes<'a>,
+) -> Result<Expression, ModelError> {
+    let operator = rest.next_node()?.try_into()?;
+    let mut bin = Binary {
+        operator,
+        left: Box::new(try_into_expression_anchor(first)?),
+        right: Box::new(try_into_expression_anchor(rest.next_node()?)?),
     };
-    while let Some(node) = inner.next() {
+    while let Some(node) = rest.next() {
         let span = Span::from_range(&bin.left.span, &bin.right.span);
         bin = Binary {
             operator: node?.try_into()?,
-            left: Box::new(Anchor {
-                element: Expression::Binary(bin),
-                span,
-            }),
-            right: inner.next_node()?.try_into_boxed_anchor()?,
+            left: Box::new(Anchor::new(Expression::Binary(bin), span)),
+            right: Box::new(try_into_expression_anchor(rest.next_node()?)?),
         }
     }
     Ok(Expression::Binary(bin))
 }
 
-fn try_node_into_unary<'a>(node: PestNode<'a>) -> Result<Expression, ModelError> {
-    let mut inner = node.into_inner();
-    let first = inner.next_node()?;
-    let operator = match first.as_rule() {
-        Rule::pos => UnaryOperator::Pos,
-        Rule::neg => UnaryOperator::Neg,
-        Rule::not => UnaryOperator::Not,
-        _ => return first.try_into(),
+fn try_into_access_operation_anchor<'a>(
+    node: PestNode<'a>,
+) -> Result<Anchor<AccessOperation>, ModelError> {
+    let op = match node.as_rule() {
+        Rule::index => {
+            let inner = node.one_inner()?;
+            let inner_span = inner.as_span();
+            Anchor::new(
+                AccessOperation::Index(Expression::try_from(inner)?),
+                inner_span,
+            )
+        }
+        Rule::field => {
+            let inner = node.one_inner()?;
+            let inner_span = inner.as_span();
+            Anchor::new(AccessOperation::Field(inner.try_into()?), inner_span)
+        }
+        _ => bail!(ModelError::parser(format!(
+            "Invalid access operation {:?}",
+            node
+        ))),
     };
-    Ok(Expression::Unary(Unary {
-        operator,
-        expression: inner.next_node()?.try_into_boxed_anchor()?,
+    Ok(op)
+}
+
+fn try_into_access<'a>(first: PestNode<'a>, rest: PestNodes<'a>) -> Result<Expression, ModelError> {
+    let collection = try_into_expression_anchor(first)?;
+    let accesses: Result<Vec<Anchor<AccessOperation>>, ModelError> = rest
+        .map(|res| res.and_then(|node| try_into_access_operation_anchor(node)))
+        .collect();
+    Ok(Expression::Access(Access {
+        collection: Box::new(collection),
+        accesses: accesses?,
     }))
 }
 
-fn try_node_into_access<'a>(node: PestNode<'a>) -> Result<Expression, ModelError> {
-    let mut inner = node.into_inner();
-    let first = inner.next_node()?;
-    let accesses: Vec<Anchor<AccessOperation>> = inner.collect_anchors()?;
-    if accesses.is_empty() {
-        first.try_into()
-    } else {
-        Ok(Expression::Access(Access {
-            collection: first.try_into_boxed_anchor()?,
-            accesses,
-        }))
+/// Creates an `Anchor<Expression>` with the correct span. The span reported by the pest `Node` for
+/// `unary`, `binary`, and `access` rules includes trailing whitespace, so this function instead
+/// constructs the span from the spans of the internal nodes.
+pub fn try_into_expression_anchor<'a>(
+    node: PestNode<'a>,
+) -> Result<Anchor<Expression>, ModelError> {
+    match node.as_rule() {
+        Rule::expression => try_into_expression_anchor(node.one_inner()?),
+        Rule::ternary => {
+            let outer_span = node.as_span();
+            let expression: Expression = node.try_into()?;
+            let inner_span = expression.get_inner_span().unwrap();
+            Ok(Anchor::new(
+                expression,
+                Span::from_range(&outer_span, &inner_span),
+            ))
+        }
+        Rule::disjunction
+        | Rule::conjunction
+        | Rule::equality
+        | Rule::comparison
+        | Rule::math1
+        | Rule::math2 => {
+            let mut inner = node.into_inner();
+            let first = inner.next_node()?;
+            if inner.peek_rule().is_some() {
+                let binary = try_into_binary(first, inner)?;
+                let span = binary.get_inner_span().unwrap();
+                Ok(Anchor::new(binary, span))
+            } else {
+                try_into_expression_anchor(first)
+            }
+        }
+        Rule::unary => {
+            let mut inner = node.into_inner();
+            let first = inner.next_node()?;
+            if inner.peek_rule().is_some() {
+                let unary = try_into_unary(first, inner.next_node()?)?;
+                let span = unary.get_inner_span().unwrap();
+                Ok(Anchor::new(unary, span))
+            } else {
+                try_into_expression_anchor(first)
+            }
+        }
+        Rule::access => {
+            let mut inner = node.into_inner();
+            let first = inner.next_node()?;
+            if inner.peek_rule().is_some() {
+                let access = try_into_access(first, inner)?;
+                let span = access.get_inner_span().unwrap();
+                Ok(Anchor::new(access, span))
+            } else {
+                try_into_expression_anchor(first)
+            }
+        }
+        _ => node.try_into(),
     }
 }
 
@@ -241,33 +341,54 @@ impl<'a> TryFrom<PestNode<'a>> for Expression {
     type Error = Report<ModelError>;
 
     fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
-        let expr_node = node.one_inner()?;
-        let e = match expr_node.as_rule() {
-            Rule::ternary => Self::Ternary(expr_node.try_into()?),
+        let e = match node.as_rule() {
+            Rule::expression => node.one_inner()?.try_into()?,
+            Rule::ternary => Self::Ternary(node.try_into()?),
             Rule::disjunction
             | Rule::conjunction
             | Rule::equality
             | Rule::comparison
             | Rule::math1
-            | Rule::math2 => try_node_into_binary(expr_node)?,
-            Rule::unary => try_node_into_unary(expr_node)?,
-            Rule::access => try_node_into_access(expr_node)?,
-            Rule::apply => Self::Apply(expr_node.try_into()?),
+            | Rule::math2 => {
+                let mut inner = node.into_inner();
+                let first = inner.next_node()?;
+                if inner.peek_rule().is_some() {
+                    try_into_binary(first, inner)?
+                } else {
+                    first.try_into()?
+                }
+            }
+            Rule::unary => {
+                let mut inner = node.into_inner();
+                let first = inner.next_node()?;
+                if inner.peek_rule().is_some() {
+                    try_into_unary(first, inner.next_node()?)?
+                } else {
+                    first.try_into()?
+                }
+            }
+            Rule::access => {
+                let mut inner = node.into_inner();
+                let first = inner.next_node()?;
+                if inner.peek_rule().is_some() {
+                    try_into_access(first, inner)?
+                } else {
+                    first.try_into()?
+                }
+            }
+            Rule::apply => Self::Apply(node.try_into()?),
             Rule::none => Self::None,
-            Rule::boolean => Self::Boolean(expr_node.try_into()?),
-            Rule::hex_int | Rule::oct_int | Rule::dec_int => Self::Int(expr_node.try_into()?),
-            Rule::float => Self::Float(expr_node.try_into()?),
-            Rule::dquote_string | Rule::squote_string => Self::String(expr_node.try_into()?),
-            Rule::array => Self::Array(expr_node.try_into()?),
-            Rule::map => Self::Map(expr_node.try_into()?),
-            Rule::pair => Self::Pair(expr_node.try_into()?),
-            Rule::object => Self::Object(expr_node.try_into()?),
-            Rule::identifier => Self::Identifier(expr_node.try_into()?),
-            Rule::group => Self::Group(expr_node.one_inner()?.try_into_boxed_anchor()?),
-            _ => bail!(ModelError::parser(format!(
-                "Invalid expression {:?}",
-                expr_node
-            ))),
+            Rule::boolean => Self::Boolean(node.try_into()?),
+            Rule::hex_int | Rule::oct_int | Rule::dec_int => Self::Int(node.try_into()?),
+            Rule::float => Self::Float(node.try_into()?),
+            Rule::dquote_string | Rule::squote_string => Self::String(node.try_into()?),
+            Rule::array => Self::Array(node.try_into()?),
+            Rule::map => Self::Map(node.try_into()?),
+            Rule::pair => Self::Pair(node.try_into()?),
+            Rule::object => Self::Object(node.try_into()?),
+            Rule::identifier => Self::Identifier(node.try_into()?),
+            Rule::group => Self::Group(node.one_inner()?.try_into_boxed_anchor()?),
+            _ => bail!(ModelError::parser(format!("Invalid expression {:?}", node))),
         };
         Ok(e)
     }

@@ -1,6 +1,6 @@
 use crate::{
     model::{Command, ModelError, Runtime, RuntimeAttribute, Task, TaskElement},
-    parsers::pest::{node::PestNode, Rule},
+    parsers::pest::{expressions, node::PestNode, Rule},
 };
 use error_stack::{bail, Report, Result};
 use std::convert::TryFrom;
@@ -10,7 +10,7 @@ impl<'a> TryFrom<PestNode<'a>> for Command {
 
     fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         Ok(Self {
-            parts: node.into_inner().collect_anchors()?,
+            parts: node.one_inner()?.into_inner().collect_anchors()?,
         })
     }
 }
@@ -22,7 +22,7 @@ impl<'a> TryFrom<PestNode<'a>> for RuntimeAttribute {
         let mut inner = node.into_inner();
         Ok(Self {
             name: inner.next_node().try_into()?,
-            expression: inner.next_node().try_into()?,
+            expression: expressions::try_into_expression_anchor(inner.next_node()?)?,
         })
     }
 }
@@ -32,7 +32,7 @@ impl<'a> TryFrom<PestNode<'a>> for Runtime {
 
     fn try_from(node: PestNode<'a>) -> Result<Self, ModelError> {
         Ok(Self {
-            attributes: node.into_inner().collect_anchors()?,
+            attributes: node.into_inner().collect_anchors_with_inner_spans()?,
         })
     }
 }
@@ -47,9 +47,7 @@ impl<'a> TryFrom<PestNode<'a>> for TaskElement {
             Rule::bound_declaration => Self::Declaration(node.try_into()?),
             Rule::meta => Self::Meta(node.try_into()?),
             Rule::parameter_meta => Self::ParameterMeta(node.try_into()?),
-            Rule::command_heredoc
-            | Rule::single_line_command_block
-            | Rule::multi_line_command_block => Self::Command(node.try_into()?),
+            Rule::command => Self::Command(node.try_into()?),
             Rule::runtime => Self::Runtime(node.try_into()?),
             _ => bail!(ModelError::parser(format!(
                 "Invalid task element {:?}",

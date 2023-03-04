@@ -5,7 +5,7 @@ use crate::{
         StringPart, Ternary, Unary, UnaryOperator,
     },
     parsers::tree_sitter::{
-        node::{TSIteratorExt, TSNode},
+        node::{BlockDelim, BlockEnds, TSNode},
         syntax::{fields, keywords, rules, symbols},
     },
 };
@@ -17,7 +17,7 @@ impl<'a> TryFrom<TSNode<'a>> for StringPart {
 
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         let part = match node.kind() {
-            rules::CONTENT => Self::Literal(node.try_into()?),
+            rules::CONTENT => Self::Content(node.try_into()?),
             rules::ESCAPE_SEQUENCE => Self::Escape(node.try_into()?),
             rules::PLACEHOLDER => {
                 let mut children = node.into_children();
@@ -37,14 +37,11 @@ impl<'a> TryFrom<TSNode<'a>> for StringLiteral {
     type Error = Report<ModelError>;
 
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
-        let mut children = node.into_children();
-        let start_quote = children.next_node()?.try_as_str()?;
+        let mut children = node.into_block(BlockEnds::Quotes, BlockDelim::None);
         let parts = match children.get_next_field(fields::PARTS)? {
             Some(parts) => parts.into_children().collect_anchors()?,
             None => Vec::new(),
         };
-        let end_quote = children.next_node()?.try_as_str()?;
-        assert_eq!(start_quote, end_quote);
         Ok(Self { parts })
     }
 }
@@ -53,12 +50,12 @@ impl<'a> TryFrom<TSNode<'a>> for ArrayLiteral {
     type Error = Report<ModelError>;
 
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
-        Ok(Self {
-            elements: node
-                .try_into_child_field(fields::ELEMENTS)?
-                .into_list(symbols::COMMA, Some(symbols::LBRACK), Some(symbols::RBRACK))
-                .collect_anchors()?,
-        })
+        let mut children = node.into_children();
+        let elements = children
+            .next_field(fields::ELEMENTS)?
+            .into_block(BlockEnds::Brackets, BlockDelim::Comma)
+            .collect_anchors()?;
+        Ok(Self { elements })
     }
 }
 
@@ -78,12 +75,12 @@ impl<'a> TryFrom<TSNode<'a>> for MapLiteral {
     type Error = Report<ModelError>;
 
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
-        Ok(Self {
-            entries: node
-                .try_into_child_field(fields::ENTRIES)?
-                .into_list(symbols::COMMA, Some(symbols::LBRACE), Some(symbols::RBRACE))
-                .collect_anchors()?,
-        })
+        let mut children = node.into_children();
+        let entries = children
+            .next_field(fields::ENTRIES)?
+            .into_block(BlockEnds::Braces, BlockDelim::Comma)
+            .collect_anchors()?;
+        Ok(Self { entries })
     }
 }
 
@@ -119,13 +116,12 @@ impl<'a> TryFrom<TSNode<'a>> for ObjectLiteral {
 
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         let mut children = node.into_children();
-        Ok(Self {
-            type_name: children.next_field(fields::TYPE).try_into()?,
-            fields: children
-                .next_field(fields::FIELDS)?
-                .into_list(symbols::COMMA, Some(symbols::LBRACE), Some(symbols::RBRACE))
-                .collect_anchors()?,
-        })
+        let type_name = children.next_field(fields::TYPE).try_into()?;
+        let fields = children
+            .next_field(fields::FIELDS)?
+            .into_block(BlockEnds::Braces, BlockDelim::Comma)
+            .collect_anchors()?;
+        Ok(Self { type_name, fields })
     }
 }
 
@@ -142,11 +138,13 @@ impl<'a> TryFrom<TSNode<'a>> for Unary {
 
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         let mut children = node.into_children();
+        let operator = children.next_field(fields::OPERATOR)?.try_into()?;
+        let expression = children
+            .next_field(fields::EXPRESSION)?
+            .try_into_boxed_anchor()?;
         Ok(Self {
-            operator: children.next_field(fields::OPERATOR)?.try_into()?,
-            expression: children
-                .next_field(fields::EXPRESSION)?
-                .try_into_boxed_anchor()?,
+            operator,
+            expression,
         })
     }
 }
@@ -182,13 +180,12 @@ impl<'a> TryFrom<TSNode<'a>> for Apply {
 
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         let mut children = node.into_children();
-        Ok(Self {
-            name: children.next_field(fields::NAME).try_into()?,
-            arguments: children
-                .next_field(fields::ARGUMENTS)?
-                .into_list(symbols::COMMA, Some(symbols::LPAREN), Some(symbols::RPAREN))
-                .collect_anchors()?,
-        })
+        let name = children.next_field(fields::NAME).try_into()?;
+        let arguments = children
+            .next_field(fields::ARGUMENTS)?
+            .into_block(BlockEnds::Parens, BlockDelim::Comma)
+            .collect_anchors()?;
+        Ok(Self { name, arguments })
     }
 }
 
@@ -207,10 +204,10 @@ impl<'a> TryFrom<TSNode<'a>> for Access {
                 let index_span = index.as_span();
                 Ok(Self {
                     collection,
-                    accesses: vec![Anchor {
-                        element: AccessOperation::Index(index.try_into()?),
-                        span: index_span,
-                    }],
+                    accesses: vec![Anchor::new(
+                        AccessOperation::Index(index.try_into()?),
+                        index_span,
+                    )],
                 })
             }
             rules::FIELD_EXPRESSION => {
@@ -223,10 +220,10 @@ impl<'a> TryFrom<TSNode<'a>> for Access {
                 let field_span = field.as_span();
                 Ok(Self {
                     collection,
-                    accesses: vec![Anchor {
-                        element: AccessOperation::Field(field.try_into()?),
-                        span: field_span,
-                    }],
+                    accesses: vec![Anchor::new(
+                        AccessOperation::Field(field.try_into()?),
+                        field_span,
+                    )],
                 })
             }
             _ => bail!(ModelError::parser(format!("Invalid access {:?}", node))),
@@ -281,7 +278,7 @@ impl<'a> TryFrom<TSNode<'a>> for Expression {
             rules::INDEX_EXPRESSION | rules::FIELD_EXPRESSION => Self::Access(node.try_into()?),
             rules::TERNARY_EXPRESSION => Self::Ternary(node.try_into()?),
             rules::GROUP_EXPRESSION => Self::Group(
-                node.into_block(symbols::LPAREN, symbols::RPAREN)
+                node.into_block(BlockEnds::Parens, BlockDelim::None)
                     .next_field(fields::EXPRESSION)?
                     .try_into_boxed_anchor()?,
             ),

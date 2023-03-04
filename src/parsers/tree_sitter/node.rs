@@ -6,6 +6,8 @@ use error_stack::{bail, report, IntoReport, Report, Result, ResultExt};
 use std::{cell::RefCell, fmt::Debug, ops::DerefMut, rc::Rc, str::FromStr};
 use tree_sitter as ts;
 
+use super::syntax::symbols;
+
 fn node_as_str<'a>(node: ts::Node<'a>, text: &'a [u8]) -> Result<&'a str, ModelError> {
     node.utf8_text(text)
         .into_report()
@@ -22,14 +24,63 @@ fn add_comment<'a, C: DerefMut<Target = Comments>>(
     mut comments: C,
 ) -> Result<(), ModelError> {
     let element = node_as_str(node, text)?;
-    let comment = Anchor {
-        element: element.to_owned(),
-        span: (&node).into(),
-    };
+    let comment = Anchor::new(element.to_owned(), (&node).into());
     comments
         .deref_mut()
         .try_insert(node.start_position().row, comment)?;
     Ok(())
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum BlockEnds {
+    Braces,
+    Brackets,
+    Parens,
+    Quotes,
+    DoubleQuotes,
+    SingleQuotes,
+    None,
+}
+
+impl BlockEnds {
+    fn get_open(symbol: &str) -> Self {
+        match symbol {
+            symbols::LBRACE => Self::Braces,
+            symbols::LBRACK => Self::Brackets,
+            symbols::LPAREN => Self::Parens,
+            symbols::DQUOTE => Self::DoubleQuotes,
+            symbols::SQUOTE => Self::SingleQuotes,
+            _ => Self::None,
+        }
+    }
+
+    fn get_close(symbol: &str) -> Self {
+        match symbol {
+            symbols::RBRACE => Self::Braces,
+            symbols::RBRACK => Self::Brackets,
+            symbols::RPAREN => Self::Parens,
+            symbols::DQUOTE => Self::DoubleQuotes,
+            symbols::SQUOTE => Self::SingleQuotes,
+            _ => Self::None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum BlockDelim {
+    Comma,
+    Dot,
+    None,
+}
+
+impl BlockDelim {
+    fn get(symbol: &str) -> Self {
+        match symbol {
+            symbols::COMMA => Self::Comma,
+            symbols::DOT => Self::Dot,
+            _ => Self::None,
+        }
+    }
 }
 
 pub struct TSNode<'a> {
@@ -90,10 +141,8 @@ impl<'a> TSNode<'a> {
     pub fn try_into_anchor_from_str<T: FromStr<Err = Report<ModelError>>>(
         self,
     ) -> Result<Anchor<T>, ModelError> {
-        Ok(Anchor {
-            span: self.as_span(),
-            element: T::from_str(self.try_as_str()?)?,
-        })
+        let span = self.as_span();
+        Ok(Anchor::new(T::from_str(self.try_as_str()?)?, span))
     }
 
     pub fn get_field(&self) -> Option<&'a str> {
@@ -130,30 +179,26 @@ impl<'a> TSNode<'a> {
     /// Consumes this node and returns an iterator over the non-comment children of this node,
     /// regardless of their kind or whether they are fields.
     pub fn into_children(self) -> TSNodeIterator<'a> {
-        TSNodeIterator::from_children(self.cursor, self.node.id(), self.text, self.comments)
+        TSNodeIterator::from_children(
+            self.cursor,
+            self.node.id(),
+            BlockEnds::None,
+            BlockDelim::None,
+            self.text,
+            self.comments,
+        )
     }
 
-    pub fn into_block(self, start: &'a str, end: &'a str) -> TSBlockIterator<'a> {
-        TSBlockIterator::new(self.into_children(), Some(start), Some(end), None)
-    }
-
-    pub fn into_list(
-        self,
-        sep: &'a str,
-        start: Option<&'a str>,
-        end: Option<&'a str>,
-    ) -> TSBlockIterator<'a> {
-        TSBlockIterator::new(self.into_children(), start, end, Some(sep))
-    }
-
-    /// Consumes this node and returns a single child of this node with the specified field name.
-    /// Returns `Err` if this node does not contain exactly one non-comment child with specified
-    /// field name.
-    pub fn try_into_child_field(self, name: &'a str) -> Result<TSNode<'a>, ModelError> {
-        let mut children = self.into_children();
-        let field = children.next_field(name)?;
-        children.drain(true)?;
-        return Ok(field);
+    /// Like `into_children` but skips over the specified end and delimiter nodes.
+    pub fn into_block(self, ends: BlockEnds, delim: BlockDelim) -> TSNodeIterator<'a> {
+        TSNodeIterator::from_children(
+            self.cursor,
+            self.node.id(),
+            ends,
+            delim,
+            self.text,
+            self.comments,
+        )
     }
 
     pub fn clone_comments(&self) -> Rc<RefCell<Comments>> {
@@ -192,10 +237,8 @@ impl<'a, T: TryFrom<TSNode<'a>, Error = Report<ModelError>>> TryFrom<TSNode<'a>>
     type Error = Report<ModelError>;
 
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
-        Ok(Self {
-            span: node.as_span(),
-            element: node.try_into()?,
-        })
+        let span = node.as_span();
+        Ok(Self::new(node.try_into()?, span))
     }
 }
 
@@ -209,25 +252,62 @@ impl<'a, T: TryFrom<TSNode<'a>, Error = Report<ModelError>>> TryFrom<Result<TSNo
     }
 }
 
+trait TSCursorExt<'a> {
+    fn get_next(
+        &mut self,
+        text: &'a [u8],
+        comments: Rc<RefCell<Comments>>,
+    ) -> Result<Option<(ts::Node<'a>, Option<&'a str>)>, ModelError>;
+}
+
+impl<'a> TSCursorExt<'a> for ts::TreeCursor<'a> {
+    fn get_next(
+        &mut self,
+        text: &'a [u8],
+        comments: Rc<RefCell<Comments>>,
+    ) -> Result<Option<(ts::Node<'a>, Option<&'a str>)>, ModelError> {
+        loop {
+            let node = self.node();
+            if node.is_error() || node.is_missing() {
+                bail!(ModelError::parser(format!("Parser error {:?}", node)));
+            } else if node.kind() == rules::COMMENT {
+                add_comment(node, text, (*comments).borrow_mut())?;
+                if !self.goto_next_sibling() {
+                    return Ok(None);
+                }
+            } else if node.is_extra() {
+                bail!(ModelError::parser(format!(
+                    "Unexpected extra node {:?}",
+                    node
+                )));
+            } else {
+                return Ok(Some((node, self.field_name())));
+            }
+        }
+    }
+}
+
 /// TSNodeIterator state.
-#[derive(Debug)]
-enum NodeIterState {
-    /// Pending iteration of cursor.
-    //Pending,
-    /// Iterating siblings of cursor's initial position.
-    //Iterating,
-    /// Pending iteration of the node (with given id) at the cursor's current position.
-    PendingChildren(usize),
-    /// Iterating children of the node (with given id) at the cursor's initial position.
-    IteratingChildren(usize),
-    /// Done iterating.
+#[derive(Debug, PartialEq)]
+enum State {
+    Enter,
+    Open,
+    Item,
+    NextItem,
+    Delim,
+    NextDelim,
+    Exhaust,
+    Exit,
     Done,
 }
 
 /// An iterator over sibling nodes.
 pub struct TSNodeIterator<'a> {
     cursor: Rc<RefCell<ts::TreeCursor<'a>>>,
-    state: NodeIterState,
+    state: State,
+    parent_id: usize,
+    ends: BlockEnds,
+    delim: BlockDelim,
     text: &'a [u8],
     comments: Rc<RefCell<Comments>>,
 }
@@ -239,12 +319,17 @@ impl<'a> TSNodeIterator<'a> {
     fn from_children(
         cursor: Rc<RefCell<ts::TreeCursor<'a>>>,
         parent_id: usize,
+        ends: BlockEnds,
+        delim: BlockDelim,
         text: &'a [u8],
         comments: Rc<RefCell<Comments>>,
     ) -> Self {
         Self {
             cursor,
-            state: NodeIterState::PendingChildren(parent_id),
+            state: State::Enter,
+            parent_id,
+            ends,
+            delim,
             text,
             comments,
         }
@@ -254,66 +339,148 @@ impl<'a> TSNodeIterator<'a> {
     /// or `None` if there are no more non-comment nodes. If this is an iterator over child nodes,
     /// then the iterator is returned to the parent node the first time this method returns `None`.
     fn advance(&mut self) -> Result<Option<(ts::Node<'a>, Option<&'a str>)>, ModelError> {
-        let mut cursor = (*self.cursor).borrow_mut();
-        println!("starting state {:?}", self.state);
         loop {
             match self.state {
-                // State::Pending => self.state = State::Iterating,
-                // State::Iterating if !cursor.goto_next_sibling() => {
-                //     self.state = State::Done;
-                //     return Ok(None);
-                // }
-                NodeIterState::PendingChildren(parent_id) if cursor.goto_first_child() => {
-                    println!("pending {} -> iterating {}", parent_id, cursor.node().id());
-                    self.state = NodeIterState::IteratingChildren(parent_id)
+                State::Enter if (*self.cursor).borrow_mut().goto_first_child() => {
+                    self.state = match self.ends {
+                        BlockEnds::None => State::Item,
+                        _ => State::Open,
+                    };
                 }
-                NodeIterState::PendingChildren(parent_id) => {
-                    println!("pending -> done {}", parent_id);
-                    self.state = NodeIterState::Done;
-                    return Ok(None);
+                State::Enter => {
+                    // there are no children - the cursor should not have moved
+                    assert_eq!((*self.cursor).borrow().node().id(), self.parent_id);
+                    self.state = State::Done;
                 }
-                NodeIterState::IteratingChildren(initial_parent_id)
-                    if !cursor.goto_next_sibling() =>
-                {
-                    println!("iterating -> done {}", initial_parent_id);
+                State::Open => {
+                    let mut cursor = (*self.cursor).borrow_mut();
+                    match cursor.get_next(self.text, self.comments.clone())? {
+                        Some((node, _)) => {
+                            match BlockEnds::get_open(node.kind()) {
+                                BlockEnds::SingleQuotes if self.ends == BlockEnds::Quotes => {
+                                    self.ends = BlockEnds::SingleQuotes;
+                                }
+                                BlockEnds::DoubleQuotes if self.ends == BlockEnds::Quotes => {
+                                    self.ends = BlockEnds::DoubleQuotes;
+                                }
+                                actual if self.ends != actual => {
+                                    bail!(ModelError::parser(format!(
+                                        "Expected open symbol {:?} but found {:?}",
+                                        self.ends, actual
+                                    )));
+                                }
+                                _ => (),
+                            }
+                            if !cursor.goto_next_sibling() {
+                                bail!(ModelError::parser(format!(
+                                    "Expected close symbol {:?} but iterator is exhausted",
+                                    self.ends,
+                                )));
+                            }
+                            self.state = State::Item;
+                        }
+                        None => {
+                            self.state = State::Exit;
+                        }
+                    }
+                }
+                State::Item | State::Delim => {
+                    let mut cursor = (*self.cursor).borrow_mut();
+                    let has_ends = self.ends != BlockEnds::None;
+                    let (node, field_name) =
+                        match cursor.get_next(self.text, self.comments.clone())? {
+                            Some((node, _))
+                                if has_ends && self.ends == BlockEnds::get_close(node.kind()) =>
+                            {
+                                if cursor.goto_next_sibling() {
+                                    self.state = State::Exhaust;
+                                } else {
+                                    self.state = State::Exit;
+                                }
+                                continue;
+                            }
+                            Some(node_field) => node_field,
+                            None if has_ends => bail!(ModelError::parser(format!(
+                                "Expected close symbol {:?} but iterator is exhausted",
+                                self.ends,
+                            ))),
+                            None => {
+                                self.state = State::Exit;
+                                continue;
+                            }
+                        };
+
+                    if self.state == State::Delim {
+                        let delim = BlockDelim::get(node.kind());
+
+                        if self.delim != delim {
+                            bail!(ModelError::parser(format!(
+                                "Expected delimiter {:?} but found {:?}",
+                                self.delim, delim
+                            )));
+                        }
+                        self.state = State::NextItem;
+                    } else {
+                        if self.delim != BlockDelim::None {
+                            self.state = State::NextDelim;
+                        } else {
+                            self.state = State::NextItem;
+                        }
+                        return Ok(Some((node, field_name)));
+                    }
+                }
+                State::NextItem | State::NextDelim => {
+                    let mut cursor = (*self.cursor).borrow_mut();
+                    if cursor.goto_next_sibling() {
+                        if self.state == State::NextDelim {
+                            self.state = State::Delim;
+                        } else {
+                            self.state = State::Item;
+                        }
+                    } else if self.ends != BlockEnds::None {
+                        bail!(ModelError::parser(format!(
+                            "Expected close symbol {:?} but iterator is exhausted",
+                            self.ends,
+                        )));
+                    } else {
+                        self.state = State::Exit
+                    }
+                }
+                State::Exhaust => {
+                    match (*self.cursor)
+                        .borrow_mut()
+                        .get_next(self.text, self.comments.clone())?
+                    {
+                        Some((node, _)) => bail!(ModelError::parser(format!(
+                            "Expected iterator to be exhausted but found {:?}",
+                            node
+                        ))),
+                        None => self.state = State::Exit,
+                    }
+                }
+                State::Exit => {
+                    let mut cursor = (*self.cursor).borrow_mut();
+                    if cursor.goto_next_sibling() {
+                        bail!(ModelError::parser(format!(
+                            "Expected iterator to be exhausted but found next node {:?}",
+                            cursor.node()
+                        )));
+                    }
                     if !cursor.goto_parent() {
                         bail!(ModelError::parser(String::from(
                             "Could not return cursor to parent node",
                         )));
                     }
                     let parent_id = cursor.node().id();
-                    println!("  returned to {}", parent_id);
-                    if parent_id != initial_parent_id {
+                    if parent_id != self.parent_id {
                         bail!(ModelError::parser(format!(
                             "Node iterator returned to different parent {} than it started from {}",
-                            parent_id, initial_parent_id
+                            parent_id, self.parent_id
                         )));
                     }
-                    self.state = NodeIterState::Done;
-                    return Ok(None);
+                    self.state = State::Done;
                 }
-                NodeIterState::Done => {
-                    println!("done");
-                    return Ok(None);
-                }
-                _ => (),
-            }
-            let node = cursor.node();
-            println!("node {:?} field {:?}", node, cursor.field_name());
-            if node.is_error() || node.is_missing() {
-                return Err(report!(ModelError::parser(format!(
-                    "Parser error {:?}",
-                    node
-                ))));
-            } else if node.kind() == rules::COMMENT {
-                add_comment(node, self.text, (*self.comments).borrow_mut())?;
-            } else if node.is_extra() {
-                return Err(report!(ModelError::parser(format!(
-                    "Unexpected extra node {:?}",
-                    node
-                ))));
-            } else {
-                return Ok(Some((node, cursor.field_name())));
+                State::Done => return Ok(None),
             };
         }
     }
@@ -334,27 +501,30 @@ impl<'a> TSNodeIterator<'a> {
         }
     }
 
-    pub fn skip_terminal(&mut self, name: &'a str) -> Result<(), ModelError> {
-        let node = self.advance()?;
-        println!("skip_terminal {} {:?}", name, node);
-        match node {
-            Some((node, None)) if node.kind() == name => Ok(()),
+    /// Asserts that there is a next node and it has the given kind.
+    pub fn skip_terminal(&mut self, kind: &'a str) -> Result<(), ModelError> {
+        match self.advance()? {
+            Some((node, None)) if node.kind() == kind => Ok(()),
             Some((node, field)) => Err(report!(ModelError::parser(format!(
                 "Expected next node to be a terminal with kind '{}' but was {:?} (field: {:?})",
-                name, node, field
+                kind, node, field
             )))),
             None => Err(report!(ModelError::parser(format!(
-                "Expected next node to be a terminal with kind '{name}' but iterator is exhausted",
+                "Expected next node to be a terminal with kind '{}' but iterator is exhausted",
+                kind
             )))),
         }
     }
 
-    pub fn skip_optional(&mut self, name: &'a str) -> Result<bool, ModelError> {
+    /// Returns `true` if there is a next node and it has the given kind. Returns `false` if there
+    /// is no next node. Otherwise returns an error. This should only be called to skip a node at
+    /// the end of a rule since it does consume the node.
+    pub fn skip_optional_last(&mut self, kind: &'a str) -> Result<bool, ModelError> {
         match self.advance()? {
-            Some((node, None)) if node.kind() == name => Ok(true),
+            Some((node, None)) if node.kind() == kind => Ok(true),
             Some((node, field)) => Err(report!(ModelError::parser(format!(
                 "Expected next node to be a terminal with kind '{}' but was {:?} (field: {:?})",
-                name, node, field
+                kind, node, field
             )))),
             None => Ok(false),
         }
@@ -392,12 +562,28 @@ impl<'a> TSNodeIterator<'a> {
         })
     }
 
+    pub fn set_delim(&mut self, delim: BlockDelim) -> Result<(), ModelError> {
+        match self.state {
+            State::NextItem | State::NextDelim => self.delim = delim,
+            _ => bail!(ModelError::parser(format!(
+                "Cannot initiate list from state {:?}",
+                self.state
+            ))),
+        }
+        Ok(())
+    }
+
+    pub fn collect_anchors<T: TryFrom<TSNode<'a>, Error = Report<ModelError>>>(
+        &mut self,
+    ) -> Result<Vec<Anchor<T>>, ModelError> {
+        self.map(|res| res.try_into()).collect()
+    }
+
     /// Consumes the remaining items in the iterator. Returns an `Err` if `ensure_exhausted` is
     /// `true` and the iterator contains any non-comment nodes.
     fn drain(&mut self, ensure_exhausted: bool) -> Result<(), ModelError> {
         // advance the iterator to the end to ensure all comment nodes are handled and the cursor
         // is returned to the parent node
-        println!("drain {}", ensure_exhausted);
         let mut remaining = Vec::new();
         while let Some(next) = self.advance()? {
             remaining.push(next);
@@ -442,209 +628,3 @@ impl<'a> Drop for TSNodeIterator<'a> {
         self.drain(false).unwrap();
     }
 }
-
-#[derive(Clone, Debug)]
-enum BlockIterState<'a> {
-    Start {
-        start: Option<&'a str>,
-        end: Option<&'a str>,
-        sep: Option<&'a str>,
-    },
-    Item {
-        end: Option<&'a str>,
-        sep: Option<&'a str>,
-    },
-    Sep {
-        end: Option<&'a str>,
-        sep: Option<&'a str>,
-    },
-    Done,
-}
-
-pub struct TSBlockIterator<'a> {
-    nodes: TSNodeIterator<'a>,
-    state: BlockIterState<'a>,
-}
-
-impl<'a> TSBlockIterator<'a> {
-    fn new(
-        nodes: TSNodeIterator<'a>,
-        start: Option<&'a str>,
-        end: Option<&'a str>,
-        sep: Option<&'a str>,
-    ) -> Self {
-        let state = match start {
-            Some(_) => BlockIterState::Start { start, end, sep },
-            None => BlockIterState::Item { end, sep },
-        };
-        Self { nodes, state }
-    }
-}
-
-impl<'a> TSBlockIterator<'a> {
-    pub fn next_field(&mut self, name: &'a str) -> Result<TSNode<'a>, ModelError> {
-        let node = self.next().unwrap_or_else(|| {
-            Err(report!(ModelError::parser(format!(
-                "Expected next node to be a field with name '{}' but iterator is exhausted",
-                name
-            ))))
-        })?;
-        node.ensure_field(name)?;
-        Ok(node)
-    }
-}
-
-impl<'a> Iterator for TSBlockIterator<'a> {
-    type Item = Result<TSNode<'a>, ModelError>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match (self.nodes.next(), &self.state) {
-            (
-                Some(Ok(next)),
-                BlockIterState::Start {
-                    start: Some(delim),
-                    end,
-                    sep,
-                },
-            ) if next.kind() == *delim => {
-                self.state = BlockIterState::Item {
-                    end: end.clone(),
-                    sep: sep.clone(),
-                };
-                self.next()
-            }
-            (
-                Some(Ok(next)),
-                BlockIterState::Start {
-                    start: Some(delim),
-                    end: _,
-                    sep: _,
-                },
-            ) => Some(Err(report!(ModelError::parser(format!(
-                "Expected first item to be start token {} but was {:?}",
-                delim, next
-            ))))),
-            (
-                Some(Ok(next)),
-                BlockIterState::Item {
-                    end: Some(delim),
-                    sep: _,
-                },
-            ) if next.kind() == *delim => {
-                self.state = BlockIterState::Done;
-                None
-            }
-            (Some(Ok(next)), BlockIterState::Item { end, sep }) if sep.is_some() => {
-                self.state = BlockIterState::Sep {
-                    end: end.clone(),
-                    sep: sep.clone(),
-                };
-                Some(Ok(next))
-            }
-            (Some(Ok(next)), BlockIterState::Item { end: _, sep: _ }) => Some(Ok(next)),
-            (
-                Some(Ok(next)),
-                BlockIterState::Sep {
-                    end: Some(delim),
-                    sep: _,
-                },
-            ) if next.kind() == *delim => {
-                self.state = BlockIterState::Done;
-                None
-            }
-            (
-                Some(Ok(next)),
-                BlockIterState::Sep {
-                    end,
-                    sep: Some(delim),
-                },
-            ) if next.kind() == *delim => {
-                self.state = BlockIterState::Item {
-                    end: end.clone(),
-                    sep: Some(delim),
-                };
-                self.next()
-            }
-            (Some(Ok(next)), BlockIterState::Done) => {
-                Some(Err(report!(ModelError::parser(format!(
-                    "Expected iterator to be exhausted but found next node {:?}",
-                    next
-                )))))
-            }
-            (Some(Err(err)), _) => Some(Err(err)),
-            (
-                None,
-                BlockIterState::Start {
-                    start: Some(delim),
-                    end: _,
-                    sep: _,
-                },
-            ) => Some(Err(report!(ModelError::parser(format!(
-                "Expected next item to be start token token {} but was None",
-                delim
-            ))))),
-            (
-                None,
-                BlockIterState::Start {
-                    start: None,
-                    end: Some(delim),
-                    sep: _,
-                },
-            ) => Some(Err(report!(ModelError::parser(format!(
-                "Expected next item to be a block element or end token {} but was None",
-                delim
-            ))))),
-            (
-                None,
-                BlockIterState::Start {
-                    start: _,
-                    end: _,
-                    sep: _,
-                },
-            ) => {
-                self.state = BlockIterState::Done;
-                None
-            }
-            (
-                None,
-                BlockIterState::Item {
-                    end: Some(delim),
-                    sep: _,
-                },
-            ) => Some(Err(report!(ModelError::parser(format!(
-                "Expected next item to be a block element or end token {} but was None",
-                delim
-            ))))),
-            (
-                None,
-                BlockIterState::Sep {
-                    end: Some(end),
-                    sep: Some(sep),
-                },
-            ) => Some(Err(report!(ModelError::parser(format!(
-                "Expected next item to be a separator {} or end token {} but was None",
-                sep, end
-            ))))),
-            (None, BlockIterState::Done) => None,
-            (None, _) => {
-                self.state = BlockIterState::Done;
-                None
-            }
-            _ => Some(Err(report!(ModelError::parser(format!(
-                "Invalid iterator state {:?}",
-                self.state
-            ))))),
-        }
-    }
-}
-
-pub trait TSIteratorExt<'a>: Iterator<Item = Result<TSNode<'a>, ModelError>> {
-    fn collect_anchors<T: TryFrom<TSNode<'a>, Error = Report<ModelError>>>(
-        &mut self,
-    ) -> Result<Vec<Anchor<T>>, ModelError> {
-        self.map(|res| res.try_into()).collect()
-    }
-}
-
-impl<'a> TSIteratorExt<'a> for TSNodeIterator<'a> {}
-impl<'a> TSIteratorExt<'a> for TSBlockIterator<'a> {}

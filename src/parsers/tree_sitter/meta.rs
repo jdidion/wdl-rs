@@ -4,14 +4,12 @@ use crate::{
         MetaValue, ModelError, ParameterMeta,
     },
     parsers::tree_sitter::{
-        node::TSNode,
+        node::{BlockDelim, BlockEnds, TSNode},
         syntax::{fields, keywords, rules, symbols},
     },
 };
 use error_stack::{bail, Report, Result};
 use std::convert::TryFrom;
-
-use super::node::TSIteratorExt;
 
 impl<'a> TryFrom<TSNode<'a>> for MetaStringPart {
     type Error = Report<ModelError>;
@@ -33,14 +31,11 @@ impl<'a> TryFrom<TSNode<'a>> for MetaString {
     type Error = Report<ModelError>;
 
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
-        let mut children = node.into_children();
-        let start_quote = children.next_node()?.try_as_str()?;
+        let mut children = node.into_block(BlockEnds::Quotes, BlockDelim::None);
         let parts = match children.get_next_field(fields::PARTS)? {
             Some(parts) => parts.into_children().collect_anchors()?,
             None => Vec::new(),
         };
-        let end_quote = children.next_node()?.try_as_str()?;
-        assert_eq!(start_quote, end_quote);
         Ok(Self { parts })
     }
 }
@@ -49,12 +44,12 @@ impl<'a> TryFrom<TSNode<'a>> for MetaArray {
     type Error = Report<ModelError>;
 
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
-        Ok(Self {
-            elements: node
-                .try_into_child_field(fields::ELEMENTS)?
-                .into_list(symbols::COMMA, Some(symbols::LBRACK), Some(symbols::RBRACK))
-                .collect_anchors()?,
-        })
+        let mut children = node.into_children();
+        let elements = children
+            .next_field(fields::ELEMENTS)?
+            .into_block(BlockEnds::Brackets, BlockDelim::Comma)
+            .collect_anchors()?;
+        Ok(Self { elements })
     }
 }
 
@@ -74,12 +69,12 @@ impl<'a> TryFrom<TSNode<'a>> for MetaObject {
     type Error = Report<ModelError>;
 
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
-        Ok(Self {
-            fields: node
-                .try_into_child_field(fields::FIELDS)?
-                .into_list(symbols::COMMA, Some(symbols::LBRACE), Some(symbols::RBRACE))
-                .collect_anchors()?,
-        })
+        let mut children = node.into_children();
+        let fields = children
+            .next_field(fields::FIELDS)?
+            .into_block(BlockEnds::Braces, BlockDelim::Comma)
+            .collect_anchors()?;
+        Ok(Self { fields })
     }
 }
 
@@ -120,12 +115,11 @@ impl<'a> TryFrom<TSNode<'a>> for Meta {
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         let mut children = node.into_children();
         children.skip_terminal(keywords::META)?;
-        Ok(Self {
-            attributes: children
-                .next_field(fields::ATTRIBUTES)?
-                .into_block(symbols::LBRACE, symbols::RBRACE)
-                .collect_anchors()?,
-        })
+        let attributes = children
+            .next_field(fields::ATTRIBUTES)?
+            .into_block(BlockEnds::Braces, BlockDelim::None)
+            .collect_anchors()?;
+        Ok(Self { attributes })
     }
 }
 
@@ -135,11 +129,10 @@ impl<'a> TryFrom<TSNode<'a>> for ParameterMeta {
     fn try_from(node: TSNode<'a>) -> Result<Self, ModelError> {
         let mut children = node.into_children();
         children.skip_terminal(keywords::PARAMETER_META)?;
-        Ok(Self {
-            attributes: children
-                .next_field(fields::ATTRIBUTES)?
-                .into_block(symbols::LBRACE, symbols::RBRACE)
-                .collect_anchors()?,
-        })
+        let attributes = children
+            .next_field(fields::ATTRIBUTES)?
+            .into_block(BlockEnds::Braces, BlockDelim::None)
+            .collect_anchors()?;
+        Ok(Self { attributes })
     }
 }
