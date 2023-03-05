@@ -22,7 +22,12 @@ tree-sitter-wdl-1 = { version = "0.1.9", path = "../tree-sitter-wdl" }
 [features]
 
 [dev-dependencies]
+criterion = "0.4.0"
 pretty_assertions = "1.3.0"
 # TODO: gate pest and tree-sitter parsers on features that are enabled by default
 #pest = []
 #tree-sitter = []
+
+[[bench]]
+name = "parser"
+harness = false

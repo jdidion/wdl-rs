@@ -1,5 +1,8 @@
-pub mod pest;
-pub mod tree_sitter;
+mod pest;
+mod tree_sitter;
+
+pub use crate::parsers::pest::PestParser;
+pub use crate::parsers::tree_sitter::TreeSitterParser;
 
 use crate::model::{Document, DocumentSource};
 use error_stack::{IntoReport, Result, ResultExt};
