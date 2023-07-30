@@ -44,7 +44,7 @@ impl<'a> TryFrom<TSNode<'a>> for Type {
             rules::PAIR_TYPE => {
                 let mut children = node.into_children();
                 children.skip_terminal(keywords::PAIR)?;
-                children.skip_terminal(symbols::LPAREN)?;
+                children.skip_terminal(symbols::LBRACK)?;
                 let left = children.next_field(fields::LEFT)?.try_into_boxed_anchor()?;
                 children.skip_terminal(symbols::COMMA)?;
                 let right = children

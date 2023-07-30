@@ -126,6 +126,14 @@ impl<'a> PestNodes<'a> {
         self.pairs.peek().map(|pair| pair.as_rule())
     }
 
+    pub fn has_next(&self) -> bool {
+        match self.peek_rule() {
+            Some(Rule::COMMENT) | Some(Rule::EOI) => false,
+            Some(_) => true,
+            None => false,
+        }
+    }
+
     fn get_next_pair(&mut self) -> Result<Option<Pair<'a, Rule>>, ModelError> {
         while let Some(pair) = self.pairs.next() {
             match pair.as_rule() {

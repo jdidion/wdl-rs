@@ -115,4 +115,12 @@ mod tests {
         tests::test_comprehensive(doc);
         Ok(())
     }
+
+    #[test]
+    fn test_expressions() -> Result<(), WdlParserError> {
+        let mut parser = PestParser::new();
+        let wdl_file = test_path("expressions.wdl");
+        let _ = parser.parse_file(wdl_file)?;
+        Ok(())
+    }
 }

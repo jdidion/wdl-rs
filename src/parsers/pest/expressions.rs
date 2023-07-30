@@ -303,7 +303,7 @@ pub fn try_into_expression_anchor<'a>(
         | Rule::math2 => {
             let mut inner = node.into_inner();
             let first = inner.next_node()?;
-            if inner.peek_rule().is_some() {
+            if inner.has_next() {
                 let binary = try_into_binary(first, inner)?;
                 let span = binary.get_inner_span().unwrap();
                 Ok(Anchor::new(binary, span))
@@ -314,7 +314,7 @@ pub fn try_into_expression_anchor<'a>(
         Rule::unary => {
             let mut inner = node.into_inner();
             let first = inner.next_node()?;
-            if inner.peek_rule().is_some() {
+            if inner.has_next() {
                 let unary = try_into_unary(first, inner.next_node()?)?;
                 let span = unary.get_inner_span().unwrap();
                 Ok(Anchor::new(unary, span))
@@ -325,7 +325,7 @@ pub fn try_into_expression_anchor<'a>(
         Rule::access => {
             let mut inner = node.into_inner();
             let first = inner.next_node()?;
-            if inner.peek_rule().is_some() {
+            if inner.has_next() {
                 let access = try_into_access(first, inner)?;
                 let span = access.get_inner_span().unwrap();
                 Ok(Anchor::new(access, span))
@@ -352,7 +352,7 @@ impl<'a> TryFrom<PestNode<'a>> for Expression {
             | Rule::math2 => {
                 let mut inner = node.into_inner();
                 let first = inner.next_node()?;
-                if inner.peek_rule().is_some() {
+                if inner.has_next() {
                     try_into_binary(first, inner)?
                 } else {
                     first.try_into()?
@@ -361,7 +361,7 @@ impl<'a> TryFrom<PestNode<'a>> for Expression {
             Rule::unary => {
                 let mut inner = node.into_inner();
                 let first = inner.next_node()?;
-                if inner.peek_rule().is_some() {
+                if inner.has_next() {
                     try_into_unary(first, inner.next_node()?)?
                 } else {
                     first.try_into()?
@@ -370,7 +370,7 @@ impl<'a> TryFrom<PestNode<'a>> for Expression {
             Rule::access => {
                 let mut inner = node.into_inner();
                 let first = inner.next_node()?;
-                if inner.peek_rule().is_some() {
+                if inner.has_next() {
                     try_into_access(first, inner)?
                 } else {
                     first.try_into()?
